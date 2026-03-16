@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import NetInfo from '@react-native-community/netinfo';
 import { RootStackParamList } from './types';
 import { isSupabaseConfigured, supabase } from '../services/supabaseClient';
 import { fetchMyAppUser } from '../services/userData';
+import { retryAsync } from '../services/retry';
 import { useUserStore } from '../store/userStore';
 import { useAppAlert } from '../components/ui/AppAlert';
-import { promptEssentialPermissionsOnFirstAuth } from '../services/permissions';
 import { SplashOverlay } from '../components/SplashOverlay';
 import { consumeUserInitiatedSignOut } from '../services/authSignals';
 
@@ -36,6 +37,8 @@ import HistoryScreen from '../screens/main/HistoryScreen';
 import SubscriptionScreen from '../screens/main/SubscriptionScreen';
 import HelpCenterScreen from '../screens/main/HelpCenterScreen';
 import UpgradePlanScreen from '../screens/main/UpgradePlanScreen';
+import ChatScreen from '../screens/main/ChatScreen';
+import BodyTrackerScreen from '../screens/main/BodyTrackerScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -67,7 +70,6 @@ function isLikelyRefreshTokenExpiredError(err: any): boolean {
 
 export default function RootNavigator() {
   const setProfile = useUserStore(state => state.setProfile);
-  const loadProfile = useUserStore(state => state.loadProfile);
   const clearAllData = useUserStore(state => state.clearAllData);
   const { alert } = useAppAlert();
   const [booting, setBooting] = useState(true);
@@ -75,6 +77,7 @@ export default function RootNavigator() {
   const navigationRef = useMemo(() => createNavigationContainerRef<RootStackParamList>(), []);
   const [navReady, setNavReady] = useState(false);
   const [sessionExpiredNoticeShown, setSessionExpiredNoticeShown] = useState(false);
+  const [networkNoticeShown, setNetworkNoticeShown] = useState(false);
 
   const resetTo = (name: keyof RootStackParamList, params?: any) => {
     if (navigationRef.isReady()) {
@@ -86,6 +89,24 @@ export default function RootNavigator() {
 
   useEffect(() => {
     let mounted = true;
+
+    const notifyNetworkIssueOnce = async () => {
+      if (!mounted || networkNoticeShown) return;
+
+      try {
+        const state = await NetInfo.fetch();
+        const isOffline = state.isConnected === false || state.isInternetReachable === false;
+        if (!isOffline) return;
+
+        setNetworkNoticeShown(true);
+        alert({
+          title: '네트워크 연결 확인',
+          message: '현재 서버에 연결되지 않아 로그인과 기록 동기화가 제한될 수 있어요. 앱을 사용하기 전에 Wi‑Fi 또는 모바일 데이터 연결을 확인해주세요.',
+        });
+      } catch {
+        // ignore
+      }
+    };
 
     const notifySessionExpiredAndGoLogin = () => {
       if (!mounted) return;
@@ -104,13 +125,7 @@ export default function RootNavigator() {
 
     (async () => {
       try {
-        // 원격 세션/프로필 로드보다 먼저, 로컬 캐시를 복원해
-        // 앱 재시작/새로고침 시 목표 등이 "초기화"처럼 보이지 않게 합니다.
-        try {
-          await loadProfile();
-        } catch {
-          // ignore
-        }
+        await notifyNetworkIssueOnce();
 
         if (!isSupabaseConfigured || !supabase) {
           if (mounted) resetTo('Login');
@@ -140,6 +155,7 @@ export default function RootNavigator() {
             if ((refreshed as any)?.data?.session) session = (refreshed as any).data.session;
           } catch (e) {
             // timeout/네트워크 등은 즉시 로그아웃하지 않음
+            await notifyNetworkIssueOnce();
             if (isLikelyRefreshTokenExpiredError(e)) {
               try {
                 await clearAllData();
@@ -152,16 +168,17 @@ export default function RootNavigator() {
           }
         }
         if (!session) {
+          await notifyNetworkIssueOnce();
           if (mounted) resetTo('Login');
           return;
         }
 
-        // 세션이 있으면(=로그인 상태) 첫 1회 권한 안내
-        void promptEssentialPermissionsOnFirstAuth(alert);
-
         // 세션이 있으면 프로필도 미리 로드
         try {
-          const remoteProfile = await withTimeout(fetchMyAppUser(), 1500);
+          const remoteProfile = await retryAsync(
+            () => withTimeout(fetchMyAppUser(), 1500),
+            { retries: 1, delayMs: 700 }
+          );
           await setProfile(remoteProfile as any);
           if (mounted) {
             if (remoteProfile?.onboardingCompleted) {
@@ -175,6 +192,7 @@ export default function RootNavigator() {
           if (mounted) resetTo('MainTab', { screen: 'Scan' });
         }
       } catch {
+        await notifyNetworkIssueOnce();
         if (mounted) resetTo('Login');
       } finally {
         if (mounted) setBooting(false);
@@ -212,10 +230,11 @@ export default function RootNavigator() {
         return;
       }
 
-      // 로그인 성공 시(세션 생성) 첫 1회 권한 안내
-      void promptEssentialPermissionsOnFirstAuth(alert);
       try {
-        const remoteProfile = await withTimeout(fetchMyAppUser(), 1500);
+        const remoteProfile = await retryAsync(
+          () => withTimeout(fetchMyAppUser(), 1500),
+          { retries: 1, delayMs: 700 }
+        );
         await setProfile(remoteProfile as any);
         if (remoteProfile?.onboardingCompleted) {
           resetTo('MainTab', { screen: 'Scan' });
@@ -231,7 +250,7 @@ export default function RootNavigator() {
       mounted = false;
       sub?.data?.subscription?.unsubscribe?.();
     };
-  }, [alert, clearAllData, sessionExpiredNoticeShown, setProfile]);
+  }, [alert, clearAllData, networkNoticeShown, sessionExpiredNoticeShown, setProfile]);
 
   return (
     <>
@@ -253,6 +272,8 @@ export default function RootNavigator() {
           <Stack.Screen name="Signup" component={SignupScreen} />
           <Stack.Screen name="Onboarding" component={OnboardingScreen} />
           <Stack.Screen name="MainTab" component={MainTabNavigator} />
+          <Stack.Screen name="Chat" component={ChatScreen} />
+          <Stack.Screen name="BodyTracker" component={BodyTrackerScreen} />
           <Stack.Screen name="History" component={HistoryScreen} />
           
           {/* Scan Flow */}

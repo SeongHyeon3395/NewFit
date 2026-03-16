@@ -14,7 +14,6 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import Svg, { Defs, Mask, Rect } from 'react-native-svg';
 import { COLORS, RADIUS } from '../../constants/colors';
 import { AppIcon } from '../../components/ui/AppIcon';
@@ -27,7 +26,7 @@ import { Card } from '../../components/ui/Card';
 import { consumeMonthlyScanRemote, getSessionUserId, insertFoodLogRemote, listFoodLogsRemote, refundLastScanRemote } from '../../services/userData';
 import { getPlanLimits } from '../../services/plans';
 import { useTheme } from '../../theme/ThemeProvider';
-import { enqueueFoodLogForSync, processSyncQueue } from '../../services/syncQueue';
+import { completeScanTutorial, getScanTutorialState } from '../../services/scanTutorialState';
 
 function tryGetImageResizer(): any | null {
   try {
@@ -44,6 +43,10 @@ function toFileUri(uriOrPath: string) {
   return `file://${uriOrPath}`;
 }
 
+function isLocalDeviceUri(value: unknown): value is string {
+  return typeof value === 'string' && /^(file|content):\/\//i.test(value);
+}
+
 async function getImageSizeSafe(uri: string): Promise<{ width: number; height: number } | null> {
   return new Promise(resolve => {
     try {
@@ -56,6 +59,33 @@ async function getImageSizeSafe(uri: string): Promise<{ width: number; height: n
       resolve(null);
     }
   });
+}
+
+async function fileUriToBase64(uri: string): Promise<string | null> {
+  const normalized = toFileUri(uri);
+  if (!normalized) return null;
+
+  try {
+    const response = await fetch(normalized);
+    const blob = await response.blob();
+
+    return await new Promise<string | null>((resolve) => {
+      try {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const result = typeof reader.result === 'string' ? reader.result : '';
+          const idx = result.indexOf('base64,');
+          resolve(idx >= 0 ? result.slice(idx + 'base64,'.length) : (result || null));
+        };
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      } catch {
+        resolve(null);
+      }
+    });
+  } catch {
+    return null;
+  }
 }
 
 function uuidv4(): string {
@@ -95,18 +125,18 @@ export default function VerifyScreen() {
 
   const insets = useSafeAreaInsets();
   const tutorialTop = (insets.top || StatusBar.currentHeight || 0) + 8;
-
-  const [tutorialKeys, setTutorialKeys] = useState(() => ({
-    seen: '@nutrimatch_scan_tutorial_seen',
-    phase: '@nutrimatch_scan_tutorial_phase',
-  }));
-  const baseTutorialSeenKey = useMemo(() => '@nutrimatch_scan_tutorial_seen', []);
-  const baseTutorialPhaseKey = useMemo(() => '@nutrimatch_scan_tutorial_phase', []);
   const [showVerifyTutorial, setShowVerifyTutorial] = useState(false);
+  const [sessionUserId, setSessionUserId] = useState<string | null>(null);
 
   const consumeScanOrAlert = async () => {
     const userId = await getSessionUserId().catch(() => null);
-    if (!userId) return true;
+    if (!userId) {
+      alert({
+        title: '로그인 필요',
+        message: '스캔 분석은 서버 연결이 필요해요. 네트워크 연결을 확인한 뒤 로그인 후 다시 시도해주세요.',
+      });
+      return false;
+    }
 
     try {
       await consumeMonthlyScanRemote(monthlyScanLimit);
@@ -147,68 +177,19 @@ export default function VerifyScreen() {
     let mounted = true;
     (async () => {
       const userId = await getSessionUserId().catch(() => null);
-      if (mounted && userId) {
-        setTutorialKeys(prev => {
-          const next = {
-            seen: `@nutrimatch_scan_tutorial_seen:${userId}`,
-            phase: `@nutrimatch_scan_tutorial_phase:${userId}`,
-          };
-          if (prev.seen === next.seen && prev.phase === next.phase) return prev;
-          return next;
-        });
-      }
-
-      // "건너뛰기"를 눌렀다면 촬영/분석 이후에도 절대 튜토리얼이 나오지 않도록,
-      // phase 뿐 아니라 seen 값도 함께 확인합니다(레이스 컨디션 방어).
-      const scopedSeenKey = userId ? `@nutrimatch_scan_tutorial_seen:${userId}` : null;
-      const scopedPhaseKey = userId ? `@nutrimatch_scan_tutorial_phase:${userId}` : null;
-      const seenKeyToRead = scopedSeenKey ?? baseTutorialSeenKey;
-      const phaseKeyToRead = scopedPhaseKey ?? baseTutorialPhaseKey;
-
-      try {
-        const [seen, phase] = await Promise.all([
-          AsyncStorage.getItem(seenKeyToRead),
-          AsyncStorage.getItem(phaseKeyToRead),
-        ]);
-        if (!mounted) return;
-        if (seen === '1') {
-          setShowVerifyTutorial(false);
-          // 혹시 남아있는 phase는 정리(다시 뜨는 것 방지)
-          try {
-            await AsyncStorage.removeItem(phaseKeyToRead);
-          } catch {
-            // ignore
-          }
-          return;
-        }
-        setShowVerifyTutorial(phase === 'verify');
-      } catch {
-        if (mounted) setShowVerifyTutorial(false);
-      }
+      if (!mounted) return;
+      setSessionUserId(userId);
+      const tutorialState = getScanTutorialState(userId);
+      setShowVerifyTutorial(Boolean(!tutorialState.seen && tutorialState.phase === 'verify'));
     })();
     return () => {
       mounted = false;
     };
-  }, [tutorialKeys.phase]);
+  }, []);
 
   const finalizeTutorial = async () => {
     setShowVerifyTutorial(false);
-    try {
-      const userId = await getSessionUserId().catch(() => null);
-      const scopedSeenKey = userId ? `@nutrimatch_scan_tutorial_seen:${userId}` : null;
-      const scopedPhaseKey = userId ? `@nutrimatch_scan_tutorial_phase:${userId}` : null;
-
-      await AsyncStorage.setItem(baseTutorialSeenKey, '1');
-      await AsyncStorage.removeItem(baseTutorialPhaseKey);
-      if (scopedSeenKey) await AsyncStorage.setItem(scopedSeenKey, '1');
-      if (scopedPhaseKey) await AsyncStorage.removeItem(scopedPhaseKey);
-
-      // 화면 상태에서 쓰는 현재 키도 함께 정리
-      await AsyncStorage.setItem(tutorialKeys.seen, '1');
-      await AsyncStorage.removeItem(tutorialKeys.phase);
-    } catch {
-      // ignore
-    }
+    completeScanTutorial(sessionUserId);
   };
 
   const handleRetake = () => {
@@ -336,41 +317,29 @@ export default function VerifyScreen() {
       analysis.userAnalysis = ensureUserAnalysis(analysis, profile);
 
       const savedAt = new Date().toISOString();
-      const localUserId = profile?.id ?? 'local';
       const sessionUserId = await getSessionUserId().catch(() => null);
+      const imageBase64 = await fileUriToBase64(uploadUri);
 
-      if (sessionUserId) {
-        const localId = uuidv4();
-        const localLog = {
-          id: localId,
-          userId: sessionUserId,
-          imageUri: uploadUri,
-          analysis,
-          mealType: 'snack' as const,
-          timestamp: savedAt,
-        };
+      if (!sessionUserId) {
+        throw new Error('로그인 상태에서만 분석 기록을 저장할 수 있어요. 다시 로그인 후 시도해주세요.');
+      }
 
-        await addFoodLog(localLog as any);
+      const localId = uuidv4();
+      const remoteLog = await insertFoodLogRemote({
+        id: localId,
+        userId: sessionUserId,
+        imageUri: uploadUri,
+        imageBase64,
+        analysis,
+        mealType: 'snack',
+        timestamp: savedAt,
+      } as any);
 
-        try {
-          await insertFoodLogRemote(localLog as any);
-          const remoteLogs = await listFoodLogsRemote(100).catch(() => null);
-          if (Array.isArray(remoteLogs)) {
-            await setFoodLogs(remoteLogs);
-          }
-          void processSyncQueue(sessionUserId);
-        } catch {
-          await enqueueFoodLogForSync({ userId: sessionUserId, log: localLog as any });
-        }
-      } else {
-        await addFoodLog({
-          id: `${Date.now()}`,
-          userId: localUserId,
-          imageUri: uploadUri,
-          analysis,
-          mealType: 'snack',
-          timestamp: savedAt,
-        });
+      const remoteLogs = await listFoodLogsRemote(100).catch(() => null);
+      if (Array.isArray(remoteLogs)) {
+        await setFoodLogs(remoteLogs);
+      } else if (remoteLog) {
+        await setFoodLogs([remoteLog as any]);
       }
 
       navigation.navigate('Result', {

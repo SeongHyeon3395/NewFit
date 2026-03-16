@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "android": "react-native run-android",
+    "android:clean": "powershell -ExecutionPolicy Bypass -File ./scripts/run-android-clean.ps1",
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",

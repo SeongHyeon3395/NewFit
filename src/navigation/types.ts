@@ -6,6 +6,8 @@ export type RootStackParamList = {
   Signup: undefined;
   Onboarding: { initialStep?: number } | undefined;
   MainTab: NavigatorScreenParams<MainTabParamList> | undefined;
+  Chat: undefined;
+  BodyTracker: undefined;
   History: undefined;
   Camera: undefined;
   Edit: { imageUri: string };
@@ -33,7 +35,6 @@ export type RootStackParamList = {
 export type MainTabParamList = {
   Scan: undefined;
   Meal: undefined;
-  Chat: undefined;
   Calendar: undefined;
   Profile: undefined;
 };

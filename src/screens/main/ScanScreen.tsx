@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, StatusBar, View, Text, StyleSheet, TouchableOpacity, useWindowDimensions, Image, ScrollView, LayoutChangeEvent, NativeSyntheticEvent, NativeScrollEvent, PermissionsAndroid, Platform } from 'react-native';
+import { Modal, StatusBar, View, Text, StyleSheet, TouchableOpacity, useWindowDimensions, Image, ScrollView, LayoutChangeEvent, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import Svg, { Defs, Mask, Rect } from 'react-native-svg';
 import { useNetInfo } from '@react-native-community/netinfo';
 import { COLORS, SPACING, RADIUS } from '../../constants/colors';
@@ -12,10 +11,12 @@ import { AppIcon } from '../../components/ui/AppIcon';
 import { Badge } from '../../components/ui/Badge';
 import { useAppAlert } from '../../components/ui/AppAlert';
 import { getMonthlyScanCountRemote, getSessionUserId, listFoodLogsRemote } from '../../services/userData';
-import { pickPhotoFromCamera, pickPhotoFromLibrary } from '../../services/imagePicker';
+import { pickPhotoFromLibrary } from '../../services/imagePicker';
+import { ensureCameraPermissionWithPrompt, ensurePhotoLibraryPermissionWithPrompt } from '../../services/permissions';
 import { useUserStore } from '../../store/userStore';
 import { getPlanLimits } from '../../services/plans';
 import { useTheme } from '../../theme/ThemeProvider';
+import { completeScanTutorial, getScanTutorialState, markScanTutorialVerifyPhase } from '../../services/scanTutorialState';
 
 export default function ScanScreen() {
   const navigation = useNavigation();
@@ -57,20 +58,18 @@ export default function ScanScreen() {
 
   const scanButtonFixedRef = useRef<View | null>(null);
   const [scanButtonRect, setScanButtonRect] = useState<null | { x: number; y: number; width: number; height: number }>(null);
-
-  const [tutorialKeys, setTutorialKeys] = useState(() => ({
-    seen: '@nutrimatch_scan_tutorial_seen',
-    pending: '@nutrimatch_scan_tutorial_pending',
-    phase: '@nutrimatch_scan_tutorial_phase',
-  }));
-  const baseTutorialSeenKey = useMemo(() => '@nutrimatch_scan_tutorial_seen', []);
-  const baseTutorialPendingKey = useMemo(() => '@nutrimatch_scan_tutorial_pending', []);
-  const baseTutorialPhaseKey = useMemo(() => '@nutrimatch_scan_tutorial_phase', []);
   const [showTutorial, setShowTutorial] = useState(false);
+  const [sessionUserId, setSessionUserId] = useState<string | null>(null);
 
   const ensureScanQuotaOrAlert = async () => {
     const userId = await getSessionUserId().catch(() => null);
-    if (!userId) return true; // 로컬 모드 제한 없음
+    if (!userId) {
+      alert({
+        title: '로그인 필요',
+        message: '스캔 기록은 서버에만 저장돼요. 네트워크 연결을 확인한 뒤 로그인 후 다시 시도해주세요.',
+      });
+      return false;
+    }
 
     try {
       const used = await getMonthlyScanCountRemote();
@@ -104,72 +103,46 @@ export default function ScanScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      let alive = true;
+      let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
       void (async () => {
+        const userId = await getSessionUserId().catch(() => null);
+        if (!alive) return;
+        setSessionUserId(userId);
+        const tutorialState = getScanTutorialState(userId);
+        setShowTutorial(Boolean(tutorialState.pending && !tutorialState.seen && tutorialState.phase !== 'verify'));
+
         await refreshMonthlyCount();
         await loadFoodLogs();
 
-        const userId = await getSessionUserId().catch(() => null);
         if (!userId) return;
 
         const remote = await listFoodLogsRemote(50).catch(() => null);
+        if (!alive) return;
+
         if (Array.isArray(remote)) {
           await setFoodLogs(remote);
+          return;
         }
+
+        retryTimer = setTimeout(() => {
+          if (!alive) return;
+          void (async () => {
+            const retried = await listFoodLogsRemote(50).catch(() => null);
+            if (alive && Array.isArray(retried)) {
+              await setFoodLogs(retried);
+            }
+          })();
+        }, 900);
       })();
+
+      return () => {
+        alive = false;
+        if (retryTimer) clearTimeout(retryTimer);
+      };
     }, [refreshMonthlyCount, loadFoodLogs, setFoodLogs])
   );
-
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const userId = await getSessionUserId().catch(() => null);
-      if (!mounted || !userId) return;
-      setTutorialKeys(prev => {
-        const next = {
-          seen: `@nutrimatch_scan_tutorial_seen:${userId}`,
-          pending: `@nutrimatch_scan_tutorial_pending:${userId}`,
-          phase: `@nutrimatch_scan_tutorial_phase:${userId}`,
-        };
-        if (prev.seen === next.seen && prev.pending === next.pending && prev.phase === next.phase) return prev;
-        return next;
-      });
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const [seen, pending, phase] = await Promise.all([
-          AsyncStorage.getItem(tutorialKeys.seen),
-          AsyncStorage.getItem(tutorialKeys.pending),
-          AsyncStorage.getItem(tutorialKeys.phase),
-        ]);
-
-        if (!mounted) return;
-
-        if (seen === '1') {
-          setShowTutorial(false);
-          return;
-        }
-
-        if (phase === 'verify') {
-          setShowTutorial(false);
-          return;
-        }
-
-        setShowTutorial(pending === '1');
-      } catch {
-        if (mounted) setShowTutorial(false);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [tutorialKeys.pending, tutorialKeys.phase, tutorialKeys.seen]);
 
   const measureScanButton = () => {
     // measureInWindow gives absolute coordinates for overlay alignment
@@ -190,53 +163,8 @@ export default function ScanScreen() {
 
   const finalizeTutorial = async () => {
     setShowTutorial(false);
-    try {
-      const userId = await getSessionUserId().catch(() => null);
-      const scopedSeenKey = userId ? `@nutrimatch_scan_tutorial_seen:${userId}` : null;
-      const scopedPendingKey = userId ? `@nutrimatch_scan_tutorial_pending:${userId}` : null;
-      const scopedPhaseKey = userId ? `@nutrimatch_scan_tutorial_phase:${userId}` : null;
-
-      // 계정 키 + 레거시(base) 키를 동시에 기록해서, "아주 빠르게 건너뛰기"를 눌러도
-      // 이후(촬영/분석 포함) 튜토리얼이 다시 뜨지 않게 합니다.
-      await AsyncStorage.setItem(baseTutorialSeenKey, '1');
-      await AsyncStorage.removeItem(baseTutorialPendingKey);
-      await AsyncStorage.removeItem(baseTutorialPhaseKey);
-      if (scopedSeenKey) await AsyncStorage.setItem(scopedSeenKey, '1');
-      if (scopedPendingKey) await AsyncStorage.removeItem(scopedPendingKey);
-      if (scopedPhaseKey) await AsyncStorage.removeItem(scopedPhaseKey);
-
-      // 화면 상태에서 쓰는 현재 키도 함께 정리
-      await AsyncStorage.setItem(tutorialKeys.seen, '1');
-      await AsyncStorage.removeItem(tutorialKeys.pending);
-      await AsyncStorage.removeItem(tutorialKeys.phase);
-    } catch {
-      // ignore
-    }
+    completeScanTutorial(sessionUserId);
   };
-
-  const ensureCameraPermission = useCallback(async () => {
-    if (Platform.OS !== 'android') return true;
-
-    try {
-      const hasPermission = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.CAMERA);
-      if (hasPermission) return true;
-
-      const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA);
-      if (granted === PermissionsAndroid.RESULTS.GRANTED) return true;
-
-      alert({
-        title: '카메라 권한 필요',
-        message: '음식 사진을 촬영하려면 카메라 권한을 먼저 허용해주세요.',
-      });
-      return false;
-    } catch {
-      alert({
-        title: '카메라 권한 확인 실패',
-        message: '카메라 권한 상태를 확인하지 못했어요. 다시 시도해주세요.',
-      });
-      return false;
-    }
-  }, [alert]);
 
   const navigateToCamera = useCallback(() => {
     try {
@@ -263,24 +191,13 @@ export default function ScanScreen() {
     const ok = await ensureScanQuotaOrAlert();
     if (!ok) return false;
 
-    return ensureCameraPermission();
-  }, [alert, ensureCameraPermission, isOnline]);
+    return ensureCameraPermissionWithPrompt();
+  }, [isOnline]);
 
   const goToVerifyTutorialPhase = async () => {
     // Hide scan overlay but continue tutorial on Verify screen.
     setShowTutorial(false);
-    try {
-      const userId = await getSessionUserId().catch(() => null);
-      const scopedPhaseKey = userId ? `@nutrimatch_scan_tutorial_phase:${userId}` : null;
-
-      await AsyncStorage.setItem(baseTutorialPhaseKey, 'verify');
-      if (scopedPhaseKey) await AsyncStorage.setItem(scopedPhaseKey, 'verify');
-
-      // 화면 상태에서 쓰는 현재 키도 함께 세팅
-      await AsyncStorage.setItem(tutorialKeys.phase, 'verify');
-    } catch {
-      // ignore
-    }
+    markScanTutorialVerifyPhase(sessionUserId);
   };
 
   const tutorialTop = (insets.top || StatusBar.currentHeight || 0) + 8;
@@ -336,6 +253,9 @@ export default function ScanScreen() {
 
     const ok = await ensureScanQuotaOrAlert();
     if (!ok) return;
+
+    const hasPhotoPermission = await ensurePhotoLibraryPermissionWithPrompt();
+    if (!hasPhotoPermission) return;
 
     try {
       const picked = await pickPhotoFromLibrary({ quality: 0.84 });
@@ -446,9 +366,15 @@ export default function ScanScreen() {
                       const rootNav = nav?.getParent?.() ?? nav;
                       rootNav.navigate('History');
                     }}
-                    style={styles.tipButton}
+                    style={[
+                      styles.tipButton,
+                      {
+                        backgroundColor: isDark ? colors.surfaceElevated : colors.warningSoft,
+                        borderColor: isDark ? colors.border : colors.yellow200,
+                      },
+                    ]}
                   >
-                    <Text style={[styles.tipText, { color: colors.warningDark }]}>전체보기</Text>
+                    <Text style={[styles.tipText, { color: isDark ? colors.text : colors.warningDark }]}>전체보기</Text>
                   </TouchableOpacity>
                 </View>
 

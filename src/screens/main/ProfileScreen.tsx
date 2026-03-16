@@ -3,7 +3,6 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIn
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS, RADIUS } from '../../constants/colors';
-import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { AppIcon } from '../../components/ui/AppIcon';
@@ -12,6 +11,7 @@ import { useUserStore } from '../../store/userStore';
 import { supabase } from '../../services/supabaseClient';
 import { getMonthlyAverageDietScoreRemote, getMonthlyMealPlanCountRemote, getMonthlyScanCountRemote, getSessionUserId, updateMyProfileAvatarRemote } from '../../services/userData';
 import { pickAvatarFromLibrary } from '../../services/imagePicker';
+import { ensurePhotoLibraryPermissionWithPrompt } from '../../services/permissions';
 import { markUserInitiatedSignOut } from '../../services/authSignals';
 import { GRADE_COLORS } from '../../types/user';
 import { getPlanLabel, getPlanLimits, normalizePlanId } from '../../services/plans';
@@ -114,6 +114,9 @@ export default function ProfileScreen() {
     if (isUpdatingAvatar) return;
 
     try {
+      const hasPhotoPermission = await ensurePhotoLibraryPermissionWithPrompt();
+      if (!hasPhotoPermission) return;
+
       const picked = await pickAvatarFromLibrary();
       const localUri = String(picked?.uri ?? '').trim();
       if (!localUri) return;
@@ -142,6 +145,8 @@ export default function ProfileScreen() {
 
   useEffect(() => {
     let mounted = true;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
     (async () => {
       try {
         const userId = await getSessionUserId().catch(() => null);
@@ -157,26 +162,52 @@ export default function ProfileScreen() {
         ]);
         const mealPlanN = await getMonthlyMealPlanCountRemote().catch(() => null);
         if (!mounted) return;
-        setMonthlyScanCount(typeof n === 'number' ? n : 0);
-        setMonthlyMealPlanCount(typeof mealPlanN === 'number' ? mealPlanN : 0);
-        setMonthlyDietScore(typeof dietScore === 'number' ? dietScore : null);
+        if (typeof n === 'number') setMonthlyScanCount(n);
+        if (typeof mealPlanN === 'number') setMonthlyMealPlanCount(mealPlanN);
+        if (typeof dietScore === 'number') setMonthlyDietScore(dietScore);
+
+        if (typeof n !== 'number' || typeof mealPlanN !== 'number') {
+          retryTimer = setTimeout(() => {
+            if (!mounted) return;
+            void (async () => {
+              const [retryScan, retryMealPlan, retryScore] = await Promise.all([
+                getMonthlyScanCountRemote().catch(() => null),
+                getMonthlyMealPlanCountRemote().catch(() => null),
+                getMonthlyAverageDietScoreRemote().catch(() => null),
+              ]);
+              if (!mounted) return;
+              if (typeof retryScan === 'number') setMonthlyScanCount(retryScan);
+              if (typeof retryMealPlan === 'number') setMonthlyMealPlanCount(retryMealPlan);
+              if (typeof retryScore === 'number') setMonthlyDietScore(retryScore);
+            })();
+          }, 900);
+        }
       } catch {
-        if (mounted) setMonthlyScanCount(null);
-        if (mounted) setMonthlyMealPlanCount(null);
-        if (mounted) setMonthlyDietScore(null);
+        retryTimer = setTimeout(() => {
+          if (!mounted) return;
+          void (async () => {
+            const [retryScan, retryMealPlan, retryScore] = await Promise.all([
+              getMonthlyScanCountRemote().catch(() => null),
+              getMonthlyMealPlanCountRemote().catch(() => null),
+              getMonthlyAverageDietScoreRemote().catch(() => null),
+            ]);
+            if (!mounted) return;
+            if (typeof retryScan === 'number') setMonthlyScanCount(retryScan);
+            if (typeof retryMealPlan === 'number') setMonthlyMealPlanCount(retryMealPlan);
+            if (typeof retryScore === 'number') setMonthlyDietScore(retryScore);
+          })();
+        }, 900);
       }
     })();
     return () => {
       mounted = false;
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, [profile?.id]);
 
   const menuItems = [
     { iconName: 'person', label: '내 정보', route: 'PersonalInfo' },
     { iconName: 'history', label: '히스토리', route: 'History' },
-    { iconName: 'notifications', label: '알림 설정', route: 'NotificationSettings' },
-    { iconName: 'security', label: '개인정보 및 보안', route: 'Privacy' },
-    { iconName: 'credit-card', label: '구독 관리', route: 'Subscription' },
     { iconName: 'help-outline', label: '고객 센터', route: 'HelpCenter' },
   ];
 
@@ -210,6 +241,21 @@ export default function ProfileScreen() {
       ],
     });
   };
+
+  const quickActions = [
+    {
+      iconName: 'smart-toy' as const,
+      title: '챗봇',
+      description: '건강/식단 질문 바로 하기',
+      onPress: () => navigation.navigate('Chat' as never),
+    },
+    {
+      iconName: 'monitor-weight' as const,
+      title: '오늘 몸무게',
+      description: '체중/골격근량/체지방 기록',
+      onPress: () => navigation.navigate('BodyTracker' as never),
+    },
+  ];
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.backgroundGray }]}>
@@ -271,6 +317,25 @@ export default function ProfileScreen() {
           </Card>
         </View>
 
+        <View style={styles.quickActionRow}>
+          {quickActions.map((action) => (
+            <TouchableOpacity
+              key={action.title}
+              activeOpacity={0.88}
+              style={[styles.quickActionButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              onPress={action.onPress}
+            >
+              <View style={[styles.quickActionIcon, { backgroundColor: colors.surfaceElevated, borderColor: colors.surfaceMuted }]}>
+                <AppIcon name={action.iconName} size={22} color={colors.primaryDark} />
+              </View>
+              <View style={styles.quickActionTextCol}>
+                <Text style={[styles.quickActionTitle, { color: colors.text }]}>{action.title}</Text>
+                <Text style={[styles.quickActionDesc, { color: colors.textSecondary }]}>{action.description}</Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
+
         {/* Premium Banner */}
         <TouchableOpacity style={[
           styles.premiumBanner,
@@ -311,14 +376,6 @@ export default function ProfileScreen() {
                 }
                 if (item.route === 'Privacy') {
                   navigation.navigate('Privacy' as never);
-                  return;
-                }
-                if (item.route === 'NotificationSettings') {
-                  navigation.navigate('NotificationSettings' as never);
-                  return;
-                }
-                if (item.route === 'Subscription') {
-                  navigation.navigate('Subscription' as never);
                   return;
                 }
                 if (item.route === 'HelpCenter') {
@@ -439,6 +496,41 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: 14,
     color: COLORS.textSecondary,
+  },
+  quickActionRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 16,
+  },
+  quickActionButton: {
+    flex: 1,
+    borderRadius: RADIUS.lg,
+    borderWidth: 1,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  quickActionIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  quickActionTextCol: {
+    flex: 1,
+  },
+  quickActionTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  quickActionDesc: {
+    fontSize: 12,
+    lineHeight: 18,
   },
   premiumBanner: {
     backgroundColor: COLORS.primaryDark,

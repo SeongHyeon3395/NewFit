@@ -86,6 +86,8 @@ export default function HistoryScreen() {
   useFocusEffect(
     useCallback(() => {
       let alive = true;
+      let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
       void (async () => {
         const userId = await getSessionUserId().catch(() => null);
         if (!alive) return;
@@ -94,7 +96,18 @@ export default function HistoryScreen() {
           const remote = await listFoodLogsRemote(100).catch(() => null);
           if (alive && Array.isArray(remote) && typeof setFoodLogs === 'function') {
             await setFoodLogs(remote);
+            return;
           }
+
+          retryTimer = setTimeout(() => {
+            if (!alive) return;
+            void (async () => {
+              const retried = await listFoodLogsRemote(100).catch(() => null);
+              if (alive && Array.isArray(retried) && typeof setFoodLogs === 'function') {
+                await setFoodLogs(retried);
+              }
+            })();
+          }, 900);
           return;
         }
 
@@ -103,6 +116,7 @@ export default function HistoryScreen() {
 
       return () => {
         alive = false;
+        if (retryTimer) clearTimeout(retryTimer);
         setIsEditMode(false);
         setSelectedIds({});
       };
@@ -111,33 +125,7 @@ export default function HistoryScreen() {
 
   const isMaster =
     (profile as any)?.plan_id === 'master' ||
-    profile?.id === 'local-master' ||
     profile?.username === 'master';
-
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const userId = await getSessionUserId().catch(() => null);
-      if (!mounted) return;
-
-      if (userId) {
-        try {
-          const remote = await listFoodLogsRemote(100);
-          if (!mounted) return;
-          if (typeof setFoodLogs === 'function') setFoodLogs(remote);
-          return;
-        } catch {
-          // 서버 실패 시 로컬 폴백
-        }
-      }
-
-      await loadFoodLogs();
-    })();
-
-    return () => {
-      mounted = false;
-    };
-  }, [loadFoodLogs, setFoodLogs]);
 
   useEffect(() => {
     if (!isEditMode) setSelectedIds({});

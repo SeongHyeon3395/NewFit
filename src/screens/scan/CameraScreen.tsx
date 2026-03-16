@@ -8,6 +8,7 @@ import ReactNativeHapticFeedback from 'react-native-haptic-feedback';
 import { AppIcon } from '../../components/ui/AppIcon';
 import { COLORS } from '../../constants/colors';
 import { pickPhotoFromLibrary } from '../../services/imagePicker';
+import { ensurePhotoLibraryPermissionWithPrompt } from '../../services/permissions';
 import { CameraBottomBar, FlashMode } from '../../components/camera/CameraBottomBar';
 import { CameraPermissionView } from '../../components/camera/CameraPermissionView';
 import { TouchableOpacity } from 'react-native';
@@ -70,6 +71,8 @@ export default function CameraScreen() {
   const openGallery = useCallback(async () => {
     try {
       triggerHaptic();
+      const hasPhotoPermission = await ensurePhotoLibraryPermissionWithPrompt();
+      if (!hasPhotoPermission) return;
       const picked = await pickPhotoFromLibrary({ quality: 0.84 });
       if (!picked?.uri) return;
       navigateToEdit(picked.uri);

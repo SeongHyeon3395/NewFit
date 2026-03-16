@@ -2,9 +2,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import type { FoodLog } from '../types/user';
 import { captureError, logEvent } from './telemetry';
-import { insertFoodLogRemote } from './userData';
+import { attachFoodLogImageRemote, insertFoodLogRemote } from './userData';
 
-type SyncTaskType = 'food_log_insert';
+type SyncTaskType = 'food_log_insert' | 'food_log_image_attach';
 
 type SyncTask = {
   id: string;
@@ -46,7 +46,7 @@ async function saveQueue(userId: string, tasks: SyncTask[]) {
   await AsyncStorage.setItem(scopedQueueKey(userId), JSON.stringify(tasks));
 }
 
-export async function enqueueFoodLogForSync(params: { userId: string; log: FoodLog }) {
+export async function enqueueFoodLogForSync(params: { userId: string; log: FoodLog & { imageBase64?: string | null } }) {
   const { userId, log } = params;
   const tasks = await loadQueue(userId);
   const exists = tasks.some((t) => t.type === 'food_log_insert' && t.payload?.id === log.id);
@@ -63,6 +63,33 @@ export async function enqueueFoodLogForSync(params: { userId: string; log: FoodL
 
   await saveQueue(userId, tasks);
   logEvent('sync_queue_enqueued', { type: 'food_log_insert' });
+}
+
+export async function enqueueFoodLogImageAttachForSync(params: { userId: string; logId: string; imageUri: string; imageBase64?: string | null }) {
+  const { userId, logId, imageUri, imageBase64 } = params;
+  const normalizedLogId = String(logId || '').trim();
+  const normalizedUri = String(imageUri || '').trim();
+  if (!userId || !normalizedLogId || !normalizedUri) return;
+
+  const tasks = await loadQueue(userId);
+  const exists = tasks.some((t) => t.type === 'food_log_image_attach' && t.payload?.logId === normalizedLogId);
+  if (exists) return;
+
+  tasks.push({
+    id: makeId(),
+    type: 'food_log_image_attach',
+    userId,
+    createdAt: new Date().toISOString(),
+    tries: 0,
+    payload: {
+      logId: normalizedLogId,
+      imageUri: normalizedUri,
+      imageBase64: typeof imageBase64 === 'string' ? imageBase64 : null,
+    },
+  });
+
+  await saveQueue(userId, tasks);
+  logEvent('sync_queue_enqueued', { type: 'food_log_image_attach' });
 }
 
 let processing = false;
@@ -86,6 +113,7 @@ export async function processSyncQueue(userId: string) {
             id: log.id,
             userId,
             imageUri: log.imageUri,
+            imageBase64: (log as any).imageBase64 ?? null,
             analysis: log.analysis,
             mealType: log.mealType,
             timestamp: log.timestamp,
@@ -95,6 +123,21 @@ export async function processSyncQueue(userId: string) {
           if (isDuplicateKeyError(e)) {
             continue; // already synced
           }
+          const tries = (task.tries || 0) + 1;
+          remaining.push({ ...task, tries });
+          captureError(e, { taskType: task.type, tries });
+        }
+      } else if (task.type === 'food_log_image_attach') {
+        try {
+          const payload = task.payload as { logId: string; imageUri: string; imageBase64?: string | null };
+          await attachFoodLogImageRemote({
+            logId: payload.logId,
+            imageUri: payload.imageUri,
+            imageBase64: payload.imageBase64 ?? null,
+            userId,
+          });
+          continue;
+        } catch (e) {
           const tries = (task.tries || 0) + 1;
           remaining.push({ ...task, tries });
           captureError(e, { taskType: task.type, tries });

@@ -62,6 +62,7 @@ export interface ManualMealLog {
   protein_g: number;
   fat_g: number;
   imageUri?: string;
+  imageBase64?: string;
   timestamp: string; // ISO
 }
 

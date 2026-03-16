@@ -93,6 +93,19 @@ function normalizeFoodLogs(logs: FoodLog[]): FoodLog[] {
   return sorted.slice(-FOOD_LOGS_MAX);
 }
 
+async function isRemoteBackedSession() {
+  const sessionUserId = await getSessionUserId().catch(() => null);
+  return Boolean(sessionUserId);
+}
+
+async function clearLocalCollectionCache(baseKey: string, userId?: string | null) {
+  await AsyncStorage.multiRemove([baseKey, scopedKey(baseKey, userId)]);
+}
+
+async function clearLocalProfileCache() {
+  await AsyncStorage.removeItem(PROFILE_KEY);
+}
+
 export const useUserStore = create<UserState>((set, get) => ({
   profile: null,
   foodLogs: [],
@@ -100,7 +113,9 @@ export const useUserStore = create<UserState>((set, get) => ({
   manualMealLogs: [],
   
   setProfile: async (profile: UserProfile) => {
-    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    await clearLocalProfileCache().catch(() => {
+      // ignore
+    });
     set({ profile });
   },
   
@@ -113,16 +128,20 @@ export const useUserStore = create<UserState>((set, get) => ({
       ...updates,
       updatedAt: new Date().toISOString(),
     };
-    
-    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(updated));
+
+    await clearLocalProfileCache().catch(() => {
+      // ignore
+    });
     set({ profile: updated });
 
-    // 로그인 상태면 서버에도 반영 (실패해도 로컬은 유지)
+    // 로그인 상태면 서버에도 반영
     try {
       const userId = await getSessionUserId().catch(() => null);
       if (!userId) return;
       const remoteProfile = await updateMyAppUser(updates);
-      await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(remoteProfile));
+      await clearLocalProfileCache().catch(() => {
+        // ignore
+      });
       set({ profile: remoteProfile });
     } catch {
       // ignore
@@ -131,10 +150,10 @@ export const useUserStore = create<UserState>((set, get) => ({
   
   loadProfile: async () => {
     try {
-      const stored = await AsyncStorage.getItem(PROFILE_KEY);
-      if (stored) {
-        set({ profile: JSON.parse(stored) });
-      }
+      await clearLocalProfileCache().catch(() => {
+        // ignore
+      });
+      set({ profile: null });
     } catch (e) {
       console.error('Failed to load profile', e);
     }
@@ -163,13 +182,25 @@ export const useUserStore = create<UserState>((set, get) => ({
   addFoodLog: async (log: FoodLog) => {
     const logs = normalizeFoodLogs([...get().foodLogs, log]);
     const userId = get().profile?.id;
-    await AsyncStorage.setItem(scopedKey(FOOD_LOGS_KEY, userId), JSON.stringify(logs));
+    if (await isRemoteBackedSession()) {
+      await clearLocalCollectionCache(FOOD_LOGS_KEY, userId).catch(() => {
+        // ignore
+      });
+    } else {
+      await AsyncStorage.setItem(scopedKey(FOOD_LOGS_KEY, userId), JSON.stringify(logs));
+    }
     set({ foodLogs: logs });
   },
   
   loadFoodLogs: async () => {
     try {
       const userId = get().profile?.id;
+      if (await isRemoteBackedSession()) {
+        await clearLocalCollectionCache(FOOD_LOGS_KEY, userId).catch(() => {
+          // ignore
+        });
+        return;
+      }
       const stored = await AsyncStorage.getItem(scopedKey(FOOD_LOGS_KEY, userId));
       if (stored) {
         set({ foodLogs: normalizeFoodLogs(JSON.parse(stored)) });
@@ -187,20 +218,38 @@ export const useUserStore = create<UserState>((set, get) => ({
     const userId = get().profile?.id;
     const current = Array.isArray(get().foodLogs) ? get().foodLogs : [];
     const next = normalizeFoodLogs(mergeFoodLogsWithCachedImages(logs, current));
-    await AsyncStorage.setItem(scopedKey(FOOD_LOGS_KEY, userId), JSON.stringify(next));
+    if (await isRemoteBackedSession()) {
+      await clearLocalCollectionCache(FOOD_LOGS_KEY, userId).catch(() => {
+        // ignore
+      });
+    } else {
+      await AsyncStorage.setItem(scopedKey(FOOD_LOGS_KEY, userId), JSON.stringify(next));
+    }
     set({ foodLogs: next });
   },
   
   addBodyLog: async (log: BodyLog) => {
     const logs = [...get().bodyLogs, log];
     const userId = get().profile?.id;
-    await AsyncStorage.setItem(scopedKey(BODY_LOGS_KEY, userId), JSON.stringify(logs));
+    if (await isRemoteBackedSession()) {
+      await clearLocalCollectionCache(BODY_LOGS_KEY, userId).catch(() => {
+        // ignore
+      });
+    } else {
+      await AsyncStorage.setItem(scopedKey(BODY_LOGS_KEY, userId), JSON.stringify(logs));
+    }
     set({ bodyLogs: logs });
   },
   
   loadBodyLogs: async () => {
     try {
       const userId = get().profile?.id;
+      if (await isRemoteBackedSession()) {
+        await clearLocalCollectionCache(BODY_LOGS_KEY, userId).catch(() => {
+          // ignore
+        });
+        return;
+      }
       const stored = await AsyncStorage.getItem(scopedKey(BODY_LOGS_KEY, userId));
       if (stored) {
         set({ bodyLogs: JSON.parse(stored) });
@@ -216,14 +265,26 @@ export const useUserStore = create<UserState>((set, get) => ({
 
   setBodyLogs: async (logs: BodyLog[]) => {
     const userId = get().profile?.id;
-    await AsyncStorage.setItem(scopedKey(BODY_LOGS_KEY, userId), JSON.stringify(logs));
+    if (await isRemoteBackedSession()) {
+      await clearLocalCollectionCache(BODY_LOGS_KEY, userId).catch(() => {
+        // ignore
+      });
+    } else {
+      await AsyncStorage.setItem(scopedKey(BODY_LOGS_KEY, userId), JSON.stringify(logs));
+    }
     set({ bodyLogs: logs });
   },
 
   addManualMealLog: async (log: ManualMealLog) => {
     const logs = [...get().manualMealLogs, log];
     const userId = get().profile?.id;
-    await AsyncStorage.setItem(scopedKey(MANUAL_MEAL_LOGS_KEY, userId), JSON.stringify(logs));
+    if (await isRemoteBackedSession()) {
+      await clearLocalCollectionCache(MANUAL_MEAL_LOGS_KEY, userId).catch(() => {
+        // ignore
+      });
+    } else {
+      await AsyncStorage.setItem(scopedKey(MANUAL_MEAL_LOGS_KEY, userId), JSON.stringify(logs));
+    }
     set({ manualMealLogs: logs });
   },
 
@@ -231,7 +292,13 @@ export const useUserStore = create<UserState>((set, get) => ({
     const prev = get().manualMealLogs;
     const logs = prev.map((l) => (l.id === id ? { ...l, ...updates } : l));
     const userId = get().profile?.id;
-    await AsyncStorage.setItem(scopedKey(MANUAL_MEAL_LOGS_KEY, userId), JSON.stringify(logs));
+    if (await isRemoteBackedSession()) {
+      await clearLocalCollectionCache(MANUAL_MEAL_LOGS_KEY, userId).catch(() => {
+        // ignore
+      });
+    } else {
+      await AsyncStorage.setItem(scopedKey(MANUAL_MEAL_LOGS_KEY, userId), JSON.stringify(logs));
+    }
     set({ manualMealLogs: logs });
   },
 
@@ -239,13 +306,25 @@ export const useUserStore = create<UserState>((set, get) => ({
     const prev = get().manualMealLogs;
     const logs = prev.filter((l) => l.id !== id);
     const userId = get().profile?.id;
-    await AsyncStorage.setItem(scopedKey(MANUAL_MEAL_LOGS_KEY, userId), JSON.stringify(logs));
+    if (await isRemoteBackedSession()) {
+      await clearLocalCollectionCache(MANUAL_MEAL_LOGS_KEY, userId).catch(() => {
+        // ignore
+      });
+    } else {
+      await AsyncStorage.setItem(scopedKey(MANUAL_MEAL_LOGS_KEY, userId), JSON.stringify(logs));
+    }
     set({ manualMealLogs: logs });
   },
 
   loadManualMealLogs: async () => {
     try {
       const userId = get().profile?.id;
+      if (await isRemoteBackedSession()) {
+        await clearLocalCollectionCache(MANUAL_MEAL_LOGS_KEY, userId).catch(() => {
+          // ignore
+        });
+        return;
+      }
       const stored = await AsyncStorage.getItem(scopedKey(MANUAL_MEAL_LOGS_KEY, userId));
       if (stored) {
         set({ manualMealLogs: JSON.parse(stored) });
@@ -261,7 +340,13 @@ export const useUserStore = create<UserState>((set, get) => ({
 
   setManualMealLogs: async (logs: ManualMealLog[]) => {
     const userId = get().profile?.id;
-    await AsyncStorage.setItem(scopedKey(MANUAL_MEAL_LOGS_KEY, userId), JSON.stringify(logs));
+    if (await isRemoteBackedSession()) {
+      await clearLocalCollectionCache(MANUAL_MEAL_LOGS_KEY, userId).catch(() => {
+        // ignore
+      });
+    } else {
+      await AsyncStorage.setItem(scopedKey(MANUAL_MEAL_LOGS_KEY, userId), JSON.stringify(logs));
+    }
     set({ manualMealLogs: logs });
   },
 }));

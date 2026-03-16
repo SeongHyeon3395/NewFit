@@ -5,6 +5,7 @@ import { COLORS, RADIUS, SPACING } from '../../constants/colors';
 import { Button } from '../ui/Button';
 import { AppIcon } from '../ui/AppIcon';
 import { pickPhotoFromCamera } from '../../services/imagePicker';
+import { ensureCameraPermissionWithPrompt } from '../../services/permissions';
 import type { ManualMealLog } from '../../types/user';
 import { useTheme } from '../../theme/ThemeProvider';
 
@@ -44,6 +45,7 @@ export function ManualLogEditor(props: {
   const [mealType, setMealType] = useState<MealType>(props.initial.mealType);
   const [foodName, setFoodName] = useState(String(props.initial.foodName ?? ''));
   const [photoUri, setPhotoUri] = useState<string>(String(props.initial.imageUri ?? ''));
+  const [photoBase64, setPhotoBase64] = useState<string>(String(props.initial.imageBase64 ?? ''));
   const [calories, setCalories] = useState(String(props.initial.calories ?? 0));
   const [carbs, setCarbs] = useState(String(props.initial.carbs_g ?? 0));
   const [protein, setProtein] = useState(String(props.initial.protein_g ?? 0));
@@ -52,10 +54,14 @@ export function ManualLogEditor(props: {
   const canClose = typeof props.onClose === 'function';
 
   const capturePhoto = useCallback(async () => {
-    const picked = await pickPhotoFromCamera({ quality: 0.88 });
+    const hasCameraPermission = await ensureCameraPermissionWithPrompt();
+    if (!hasCameraPermission) return;
+
+    const picked = await pickPhotoFromCamera({ quality: 0.88, includeBase64: true });
     const uri = String(picked?.uri ?? '').trim();
     if (!uri) return;
     setPhotoUri(uri);
+    setPhotoBase64(String(picked?.base64 ?? ''));
   }, []);
 
   const submitUpdates = useMemo<Partial<ManualMealLog>>(
@@ -63,12 +69,13 @@ export function ManualLogEditor(props: {
       mealType,
       foodName: foodName.trim() ? foodName.trim() : undefined,
       imageUri: photoUri.trim() ? photoUri.trim() : undefined,
+      imageBase64: photoBase64.trim() ? photoBase64.trim() : undefined,
       calories: parseNumOrZero(calories),
       carbs_g: parseNumOrZero(carbs),
       protein_g: parseNumOrZero(protein),
       fat_g: parseNumOrZero(fat),
     }),
-    [carbs, calories, fat, foodName, mealType, photoUri, protein]
+    [carbs, calories, fat, foodName, mealType, photoBase64, photoUri, protein]
   );
 
   return (

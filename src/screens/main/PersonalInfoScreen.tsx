@@ -2,7 +2,6 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { COLORS, SPACING, RADIUS } from '../../constants/colors';
 import { Card } from '../../components/ui/Card';
@@ -44,29 +43,15 @@ export default function PersonalInfoScreen() {
   const [monthlyScanCount, setMonthlyScanCount] = useState<number | null>(null);
   const [monthlyMealPlanCount, setMonthlyMealPlanCount] = useState<number | null>(null);
   const [monthlyChatTokenRemaining, setMonthlyChatTokenRemaining] = useState<number | null>(null);
-  const quotaCacheKey = useMemo(() => {
-    const uid = String(profile?.id || 'anonymous');
-    return `@nutrimatch_personalinfo_quota:${uid}`;
-  }, [profile?.id]);
 
   const planLimits = useMemo(() => getPlanLimits(profile?.plan_id), [profile?.plan_id]);
 
   useFocusEffect(
     useCallback(() => {
       let alive = true;
-      (async () => {
-        try {
-          const cached = await AsyncStorage.getItem(quotaCacheKey);
-          if (alive && cached) {
-            const parsed = JSON.parse(cached);
-            setMonthlyScanCount(typeof parsed?.scanCount === 'number' ? parsed.scanCount : null);
-            setMonthlyMealPlanCount(typeof parsed?.mealPlanCount === 'number' ? parsed.mealPlanCount : null);
-            setMonthlyChatTokenRemaining(typeof parsed?.chatTokenRemaining === 'number' ? parsed.chatTokenRemaining : null);
-          }
-        } catch {
-          // ignore cache read failure
-        }
+      let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
+      (async () => {
         if (!isSupabaseConfigured || !supabase) return;
         try {
           const remote = await fetchMyAppUser();
@@ -91,27 +76,45 @@ export default function PersonalInfoScreen() {
           setMonthlyMealPlanCount(nextMeal ?? null);
           setMonthlyChatTokenRemaining(nextChat ?? null);
 
-          try {
-            await AsyncStorage.setItem(
-              quotaCacheKey,
-              JSON.stringify({
-                scanCount: nextScan ?? null,
-                mealPlanCount: nextMeal ?? null,
-                chatTokenRemaining: nextChat ?? null,
-              })
-            );
-          } catch {
-            // ignore cache write failure
+          if (typeof scanCount !== 'number' || typeof mealPlanCount !== 'number') {
+            retryTimer = setTimeout(() => {
+              if (!alive) return;
+              void (async () => {
+                const [retryScan, retryMeal, retryChat] = await Promise.all([
+                  getMonthlyScanCountRemote().catch(() => null),
+                  getMonthlyMealPlanCountRemote().catch(() => null),
+                  getMonthlyChatTokenStatusRemote().catch(() => null),
+                ]);
+                if (!alive) return;
+                if (typeof retryScan === 'number') setMonthlyScanCount(retryScan);
+                if (typeof retryMeal === 'number') setMonthlyMealPlanCount(retryMeal);
+                if (typeof retryChat?.remaining === 'number') setMonthlyChatTokenRemaining(retryChat.remaining);
+              })();
+            }, 900);
           }
         } catch {
           if (!alive) return;
-          // keep previous values to avoid sudden blank UI
+          retryTimer = setTimeout(() => {
+            if (!alive) return;
+            void (async () => {
+              const [retryScan, retryMeal, retryChat] = await Promise.all([
+                getMonthlyScanCountRemote().catch(() => null),
+                getMonthlyMealPlanCountRemote().catch(() => null),
+                getMonthlyChatTokenStatusRemote().catch(() => null),
+              ]);
+              if (!alive) return;
+              if (typeof retryScan === 'number') setMonthlyScanCount(retryScan);
+              if (typeof retryMeal === 'number') setMonthlyMealPlanCount(retryMeal);
+              if (typeof retryChat?.remaining === 'number') setMonthlyChatTokenRemaining(retryChat.remaining);
+            })();
+          }, 900);
         }
       })();
       return () => {
         alive = false;
+        if (retryTimer) clearTimeout(retryTimer);
       };
-    }, [setProfile, quotaCacheKey, monthlyScanCount, monthlyMealPlanCount, monthlyChatTokenRemaining])
+    }, [setProfile, monthlyScanCount, monthlyMealPlanCount, monthlyChatTokenRemaining])
   );
 
   const formatNumber = (v: unknown, unit?: string) => {

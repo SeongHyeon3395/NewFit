@@ -16,6 +16,7 @@ import { getFoodScore100 } from '../../services/foodScore';
 import { ensureUserAnalysis } from '../../services/userAnalysis';
 import { computeAllergenHits } from '../../services/allergen';
 import { useTheme } from '../../theme/ThemeProvider';
+import { getSessionUserId, insertManualMealLogRemote, listManualMealLogsRemote } from '../../services/userData';
 
 import { FoodAnalysis, GRADE_COLORS, ManualMealLog } from '../../types/user';
 
@@ -25,6 +26,33 @@ function pad2(n: number) {
 
 function toYmd(date: Date) {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+async function fileUriToBase64(uri: string): Promise<string | null> {
+  const normalized = String(uri || '').trim();
+  if (!normalized || /^https?:\/\//i.test(normalized)) return null;
+
+  try {
+    const response = await fetch(normalized);
+    const blob = await response.blob();
+
+    return await new Promise<string | null>((resolve) => {
+      try {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const result = typeof reader.result === 'string' ? reader.result : '';
+          const idx = result.indexOf('base64,');
+          resolve(idx >= 0 ? result.slice(idx + 'base64,'.length) : (result || null));
+        };
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      } catch {
+        resolve(null);
+      }
+    });
+  } catch {
+    return null;
+  }
 }
 
 function isUnknownDishName(dishName: unknown): boolean {
@@ -51,7 +79,7 @@ export default function ResultScreen() {
   const { colors, isDark } = useTheme();
 
   const profile = useUserStore(state => state.profile);
-  const addManualMealLog = useUserStore(state => state.addManualMealLog);
+  const setManualMealLogs = useUserStore(state => state.setManualMealLogs);
   const score100 = unknownFood ? 0 : getFoodScore100(analysis);
 
   const listOrEmpty = (arr: any): string[] =>
@@ -404,7 +432,6 @@ export default function ResultScreen() {
   const openSaveToCalendar = () => {
     const now = new Date();
     const ymd = toYmd(now);
-    const localUserId = profile?.id ?? 'local';
     const mealType = getMealTypeFromNow();
 
     const baseCalories = unknownFood
@@ -430,7 +457,7 @@ export default function ResultScreen() {
 
     const draft: ManualMealLog = {
       id: 'draft',
-      userId: localUserId,
+      userId: '',
       date: ymd,
       mealType,
       foodName: String(analysis?.dishName ?? '').trim() ? String(analysis.dishName).trim() : undefined,
@@ -454,17 +481,24 @@ export default function ResultScreen() {
           onSubmit={async (updates) => {
             try {
               const savedAt = new Date().toISOString();
+              const imageBase64 = await fileUriToBase64(imageUri);
+              const sessionUserId = await getSessionUserId().catch(() => null);
+              if (!sessionUserId) throw new Error('로그인 상태에서만 캘린더에 저장할 수 있어요.');
+              const remoteUserId = String(sessionUserId);
 
               // 1) 캘린더(해당 날짜 기록) 저장
               const newManual: ManualMealLog = {
                 ...draft,
                 ...updates,
                 id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
-                userId: localUserId,
+                userId: remoteUserId,
                 date: ymd,
+                imageBase64: imageBase64 ?? undefined,
                 timestamp: savedAt,
               };
-              await addManualMealLog(newManual);
+              await insertManualMealLogRemote({ ...newManual, userId: remoteUserId });
+              const remoteLogs = await listManualMealLogsRemote(1000);
+              await setManualMealLogs(remoteLogs);
 
               logEvent('calendar_log_saved', { source: isReadOnly ? 'history_result' : 'scan_result' });
               toast({ message: '캘린더에 추가했어요!', variant: 'success' });

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Animated, Easing, StyleSheet, useColorScheme, View } from 'react-native';
+import { Animated, Easing, InteractionManager, StyleSheet, useColorScheme, View } from 'react-native';
 import { useUserStore } from '../store/userStore';
+import { updateMyAppUser } from '../services/userData';
 
 import { darkColors, lightColors, type ThemeColors } from './tokens';
 import type { AppThemeMode } from '../types/user';
@@ -16,14 +16,13 @@ type ThemeContextValue = {
   setMode: (mode: ThemeMode) => Promise<void>;
 };
 
-const STORAGE_KEY = '@nutrimatch_theme_mode';
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const systemScheme = useColorScheme();
   const [mode, setModeState] = useState<ThemeMode>('system');
-  const profile = useUserStore(state => state.profile);
-  const updateProfile = useUserStore(state => state.updateProfile);
+  const profileThemeMode = useUserStore(state => state.profile?.themeMode);
+  const setProfile = useUserStore(state => state.setProfile);
   const resolvedMode = mode === 'system' ? (systemScheme === 'dark' ? 'dark' : 'light') : mode;
   const previousResolvedModeRef = useRef<'light' | 'dark'>(resolvedMode);
   const transitionOpacity = useRef(new Animated.Value(0)).current;
@@ -32,46 +31,28 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const transitionTokenRef = useRef(0);
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const stored = await AsyncStorage.getItem(STORAGE_KEY);
-        if (!mounted) return;
-        if (stored === 'light' || stored === 'dark' || stored === 'system') {
-          setModeState(stored);
-        }
-      } catch {
-        // ignore
-      }
-    })();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    const remoteMode = profile?.themeMode;
+    const remoteMode = profileThemeMode;
     if (remoteMode !== 'light' && remoteMode !== 'dark' && remoteMode !== 'system') return;
     if (remoteMode === mode) return;
 
     setModeState(remoteMode);
-    void AsyncStorage.setItem(STORAGE_KEY, remoteMode).catch(() => {
-      // ignore
-    });
-  }, [mode, profile?.themeMode]);
+  }, [profileThemeMode]);
 
   const setMode = async (nextMode: ThemeMode) => {
-    setModeState(nextMode);
-    try {
-      await AsyncStorage.setItem(STORAGE_KEY, nextMode);
-    } catch {
-      // ignore
-    }
+    if (nextMode === mode) return;
 
-    if (profile?.themeMode !== nextMode) {
-      void updateProfile({ themeMode: nextMode }).catch(() => {
-        // ignore
+    setModeState(nextMode);
+
+    if (profileThemeMode !== nextMode) {
+      InteractionManager.runAfterInteractions(() => {
+        void (async () => {
+          try {
+            const remoteProfile = await updateMyAppUser({ themeMode: nextMode });
+            await setProfile(remoteProfile);
+          } catch {
+            // ignore
+          }
+        })();
       });
     }
   };
@@ -97,7 +78,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
     transitionAnimRef.current = Animated.timing(transitionOpacity, {
       toValue: 0,
-      duration: 420,
+      duration: 220,
       easing: Easing.inOut(Easing.cubic),
       useNativeDriver: true,
     });

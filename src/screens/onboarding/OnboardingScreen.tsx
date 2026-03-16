@@ -12,7 +12,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { RootStackParamList } from '../../navigation/types';
 import { AppIcon } from '../../components/ui/AppIcon';
@@ -23,6 +22,8 @@ import { useUserStore } from '../../store/userStore';
 import type { BodyGoalType, HealthDietType, LifestyleDietType, UserProfile } from '../../types/user';
 import { fetchMyAppUser, getSessionUserId, insertBodyLogRemote } from '../../services/userData';
 import { useAppAlert } from '../../components/ui/AppAlert';
+import { retryAsync } from '../../services/retry';
+import { markScanTutorialPending } from '../../services/scanTutorialState';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Onboarding'>;
 
@@ -50,7 +51,7 @@ export default function OnboardingScreen() {
       }
 
       try {
-        const remote = await fetchMyAppUser();
+        const remote = await retryAsync(() => fetchMyAppUser(), { retries: 1, delayMs: 700 });
         if (!mounted) return;
         await setProfile(remote as any);
         if (remote?.onboardingCompleted) {
@@ -178,84 +179,44 @@ export default function OnboardingScreen() {
 
     const sessionUserId = await getSessionUserId().catch(() => null);
 
+    if (!sessionUserId) {
+      alert({
+        title: '로그인 필요',
+        message: '온보딩 정보는 서버에 저장돼요. 네트워크 연결을 확인한 뒤 다시 로그인해주세요.',
+      });
+      return;
+    }
+
     // 로그인 상태: 서버(app_users)에 저장 (userStore.updateProfile이 서버 동기화 포함)
-    if (sessionUserId) {
-      // profile이 아직 로딩 전인 극단 케이스 방어: 최소한의 로컬 프로필을 먼저 만든 뒤 업데이트
-      if (!profile) {
-        const bootstrapProfile: UserProfile = {
-          id: sessionUserId,
-          email: '',
-          name: '사용자',
-          bodyGoal: bodyGoal!,
-          healthDiet: healthDiet!,
-          lifestyleDiet: lifestyleDiet!,
-          allergens: selectedAllergens,
-          onboardingCompleted: false,
-          createdAt: now,
-          updatedAt: now,
-        };
-        await setProfile(bootstrapProfile);
-      }
+    if (!profile) {
+      const bootstrapProfile: UserProfile = {
+        id: sessionUserId,
+        email: '',
+        name: '사용자',
+        bodyGoal: bodyGoal!,
+        healthDiet: healthDiet!,
+        lifestyleDiet: lifestyleDiet!,
+        allergens: selectedAllergens,
+        onboardingCompleted: false,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await setProfile(bootstrapProfile);
+    }
 
-      await updateProfile(updates);
+    await updateProfile(updates);
 
-      if (typeof currentWeight === 'number' && currentWeight > 0) {
-        try {
-          const remoteLog = await insertBodyLogRemote({ userId: sessionUserId, weight: currentWeight, timestamp: now });
-          await addBodyLog(remoteLog);
-        } catch {
-          // body_logs 저장 실패는 온보딩 자체를 막지 않음
-        }
-      }
-    } else {
-      // 비로그인 로컬 모드 유지
-      if (!profile) {
-        const localProfile: UserProfile = {
-          id: Date.now().toString(),
-          email: '',
-          name: '사용자',
-          bodyGoal: bodyGoal!,
-          healthDiet: healthDiet!,
-          lifestyleDiet: lifestyleDiet!,
-          allergens: selectedAllergens,
-          currentWeight,
-          targetWeight,
-          height,
-          age,
-          gender: gender || undefined,
-          onboardingCompleted: true,
-          createdAt: now,
-          updatedAt: now,
-        };
-        await setProfile(localProfile);
-      } else {
-        await updateProfile(updates);
-      }
-
-      if (typeof currentWeight === 'number' && currentWeight > 0) {
-        try {
-          await addBodyLog({
-            id: `${Date.now()}`,
-            userId: profile?.id || Date.now().toString(),
-            weight: currentWeight,
-            timestamp: now,
-          });
-        } catch {
-          // ignore
-        }
+    if (typeof currentWeight === 'number' && currentWeight > 0) {
+      try {
+        const remoteLog = await insertBodyLogRemote({ userId: sessionUserId, weight: currentWeight, timestamp: now });
+        await addBodyLog(remoteLog);
+      } catch {
+        // body_logs 저장 실패는 온보딩 자체를 막지 않음
       }
     }
 
     // 온보딩 직후 스캔 탭으로 보내 튜토리얼이 자연스럽게 이어지게 함
-    try {
-      const basePendingKey = '@nutrimatch_scan_tutorial_pending';
-      await AsyncStorage.setItem(basePendingKey, '1');
-      if (sessionUserId) {
-        await AsyncStorage.setItem(`${basePendingKey}:${sessionUserId}`, '1');
-      }
-    } catch {
-      // ignore
-    }
+    markScanTutorialPending(sessionUserId);
 
     navigation.replace('MainTab', { screen: 'Scan' });
   };

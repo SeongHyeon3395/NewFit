@@ -17,6 +17,7 @@ import { Button } from '../../components/ui/Button';
 import { useAppAlert } from '../../components/ui/AppAlert';
 import { isSupabaseConfigured, supabase } from '../../services/supabaseClient';
 import { fetchMyAppUser } from '../../services/userData';
+import { retryAsync } from '../../services/retry';
 import { AppIcon } from '../../components/ui/AppIcon';
 
 function getDeviceLocaleTag(): string {
@@ -132,10 +133,10 @@ export default function LoginScreen() {
 
       // 서버 프로필(app_users) 로드 → UI에서 username/nickname 기반으로 표시
       try {
-        const remoteProfile = await fetchMyAppUser();
+        const remoteProfile = await retryAsync(() => fetchMyAppUser(), { retries: 1, delayMs: 700 });
         await setProfile({
           ...remoteProfile,
-          // 로컬 모드에서 쓰던 필드는 유지(서버 스키마에는 없음)
+          // 앱 내부 표시용 필드는 유지(서버 스키마에는 없음)
           plan_id: (profile as any)?.plan_id,
           premium_quota_remaining: (profile as any)?.premium_quota_remaining,
           free_image_quota_remaining: (profile as any)?.free_image_quota_remaining,
@@ -156,7 +157,7 @@ export default function LoginScreen() {
 
   const handleFindEmail = () => {
     alert({
-      title: '이메일 찾기',
+      title: '아이디 찾기',
       message: '고객센터(psunghyi@gmail.com)로 문의해주세요.',
     });
   };
@@ -229,7 +230,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
             <Text style={styles.findDivider}>|</Text>
             <TouchableOpacity onPress={handleFindEmail}>
-              <Text style={styles.signupLinkText}>이메일 찾기</Text>
+              <Text style={styles.signupLinkText}>아이디 찾기</Text>
             </TouchableOpacity>
             <Text style={styles.findDivider}>|</Text>
             <TouchableOpacity onPress={handleFindPassword}>

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -12,11 +13,11 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRoute } from '@react-navigation/native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { CommonActions, useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import NetInfo, { useNetInfo } from '@react-native-community/netinfo';
 import { COLORS, RADIUS, SPACING } from '../../constants/colors';
 import { AppIcon } from '../../components/ui/AppIcon';
+import { MainShortcutBar } from '../../components/ui/MainShortcutBar';
 import { chatHealth, type HealthChatMessage } from '../../services/api';
 import {
   deleteMyHealthChatMessagesRemote,
@@ -28,6 +29,7 @@ import {
 } from '../../services/userData';
 import { useAppAlert } from '../../components/ui/AppAlert';
 import { captureError, logEvent } from '../../services/telemetry';
+import { retryAsync } from '../../services/retry';
 import { useUserStore } from '../../store/userStore';
 import { useTheme } from '../../theme/ThemeProvider';
 
@@ -39,12 +41,6 @@ type ChatItem = {
   text: string;
   pending?: boolean;
 };
-
-const HEALTH_CHAT_LOCAL_KEY = '@nutrimatch_health_chat';
-
-function scopedChatKey(userId: string | null) {
-  return userId ? `${HEALTH_CHAT_LOCAL_KEY}:${userId}` : HEALTH_CHAT_LOCAL_KEY;
-}
 
 function TypingDots() {
   const [dots, setDots] = useState(1);
@@ -69,6 +65,7 @@ function makeId() {
 
 export default function ChatScreen() {
   const route = useRoute<any>();
+  const navigation = useNavigation<any>();
   const listRef = useRef<FlatList<ChatItem> | null>(null);
   const typingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cursorTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -100,6 +97,20 @@ export default function ChatScreen() {
   const isOffline = net.isConnected === false || net.isInternetReachable === false;
   const isOnline = !isOffline;
   const isTokenExhausted = typeof tokenStatus?.remaining === 'number' && tokenStatus.remaining <= 0;
+
+  const resetToMainTab = React.useCallback(
+    (screen: 'Scan' | 'Meal' | 'Calendar' | 'Profile') => {
+      const parentNav = navigation.getParent?.();
+      const rootNav = parentNav?.getParent?.() ?? parentNav ?? navigation;
+      rootNav.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [{ name: 'MainTab', params: { screen } }],
+        })
+      );
+    },
+    [navigation]
+  );
 
   const historyForApi: HealthChatMessage[] = useMemo(() => {
     // Keep it short to control token usage
@@ -143,25 +154,10 @@ export default function ChatScreen() {
       if (!mounted) return;
       setSessionUserId(userId);
 
-      const key = scopedChatKey(userId);
-
-      // 1) 로컬 먼저 복원
-      try {
-        const stored = await AsyncStorage.getItem(key);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setItems(parsed as ChatItem[]);
-          }
-        }
-      } catch {
-        // ignore
-      }
-
-      // 2) 로그인 상태면 원격도 복원(있으면 원격 우선)
+      // 로그인 상태면 원격 대화 복원
       if (userId) {
         try {
-          const remote = await fetchMyHealthChatMessagesRemote(250);
+          const remote = await retryAsync(() => fetchMyHealthChatMessagesRemote(250), { retries: 1, delayMs: 700 });
           if (Array.isArray(remote) && remote.length > 0) {
             const next: ChatItem[] = remote.map((r: any) => ({
               id: String(r?.id),
@@ -169,14 +165,13 @@ export default function ChatScreen() {
               text: String(r?.content ?? ''),
             }));
             setItems(next);
-            await AsyncStorage.setItem(key, JSON.stringify(next));
           }
         } catch {
           // ignore
         }
 
         try {
-          const status = await getMonthlyChatTokenStatusRemote();
+          const status = await retryAsync(() => getMonthlyChatTokenStatusRemote(), { retries: 1, delayMs: 700 });
           if (mounted && status) {
             setTokenStatus({
               remaining: Number(status.remaining || 0),
@@ -205,7 +200,7 @@ export default function ChatScreen() {
     (async () => {
       if (!sessionUserId) return;
       try {
-        const status = await getMonthlyChatTokenStatusRemote();
+        const status = await retryAsync(() => getMonthlyChatTokenStatusRemote(), { retries: 1, delayMs: 700 });
         if (!mounted || !status) return;
         setTokenStatus({
           remaining: Number(status.remaining || 0),
@@ -223,22 +218,15 @@ export default function ChatScreen() {
   }, [sessionUserId, profile?.plan_id]);
 
   useEffect(() => {
-    const key = scopedChatKey(sessionUserId);
     const hasPending = items.some((m) => Boolean(m?.pending));
 
-    // 타이핑 애니메이션/펜딩 중에는 저장을 미뤄서 write 폭주를 방지
+    // 타이핑 애니메이션/펜딩 중에는 원격 저장을 미뤄서 write 폭주를 방지
     if (hasPending) return;
     if (typingAssistantIdRef.current) return;
 
     if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
     saveDebounceRef.current = setTimeout(() => {
       (async () => {
-        try {
-          await AsyncStorage.setItem(key, JSON.stringify(items));
-        } catch {
-          // ignore
-        }
-
         if (!sessionUserId) return;
         if (remoteSyncInFlightRef.current) return;
         remoteSyncInFlightRef.current = true;
@@ -427,12 +415,6 @@ export default function ChatScreen() {
     setItems(greeting);
     setText('');
 
-    try {
-      await AsyncStorage.removeItem(scopedChatKey(sessionUserId));
-    } catch {
-      // ignore
-    }
-
     if (sessionUserId) {
       try {
         await deleteMyHealthChatMessagesRemote();
@@ -517,13 +499,37 @@ export default function ChatScreen() {
     );
   };
 
+  const handleBackPress = () => {
+    resetToMainTab('Profile');
+  };
+
+  useFocusEffect(
+    React.useCallback(() => {
+      const onBack = () => {
+        handleBackPress();
+        return true;
+      };
+
+      const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+      return () => sub.remove();
+    }, [resetToMainTab])
+  );
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.backgroundGray }]} edges={['top', 'left', 'right']}>
       <View style={[styles.header, { backgroundColor: colors.background, borderBottomColor: colors.border }]}>
+        <TouchableOpacity
+          onPress={handleBackPress}
+          style={styles.headerButton}
+          accessibilityRole="button"
+          accessibilityLabel="뒤로가기"
+        >
+          <AppIcon name="chevron-left" size={26} color={colors.text} />
+        </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.text }]}>헬스케어 AI</Text>
         <TouchableOpacity
           onPress={confirmNewChat}
-          style={styles.newChatButton}
+          style={styles.headerButton}
           accessibilityRole="button"
           accessibilityLabel="새 채팅 시작"
         >
@@ -599,6 +605,7 @@ export default function ChatScreen() {
           </View>
         </View>
       </KeyboardAvoidingView>
+      <MainShortcutBar />
     </SafeAreaView>
   );
 }
@@ -614,23 +621,22 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerButton: {
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerTitle: {
+    flex: 1,
     fontSize: 18,
     fontWeight: '800',
     color: COLORS.text,
-  },
-  newChatButton: {
-    position: 'absolute',
-    right: SPACING.lg,
-    top: 10,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
+    textAlign: 'center',
   },
   body: {
     flex: 1,

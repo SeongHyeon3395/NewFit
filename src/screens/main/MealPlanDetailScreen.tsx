@@ -10,6 +10,7 @@ import { COLORS } from '../../constants/colors';
 import type { MealPlanDay } from '../../types/mealPlan';
 import type { MealPlanLog } from '../../services/userData';
 import { deleteMealPlanLogRemote, getMealPlanLogRemote } from '../../services/userData';
+import { retryAsync } from '../../services/retry';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export default function MealPlanDetailScreen() {
@@ -21,18 +22,20 @@ export default function MealPlanDetailScreen() {
   const { id } = route.params as { id: number };
   const [log, setLog] = useState<MealPlanLog | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
         setLoading(true);
-        const data = await getMealPlanLogRemote(id);
+        setLoadFailed(false);
+        const data = await retryAsync(() => getMealPlanLogRemote(id), { retries: 1, delayMs: 700 });
         if (!mounted) return;
         setLog(data);
       } catch {
         if (!mounted) return;
-        setLog(null);
+        setLoadFailed(true);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -44,7 +47,7 @@ export default function MealPlanDetailScreen() {
 
   const result = log?.result;
 
-  const headerLabel = useMemo(() => {
+  const headerLabel = useMemo<string>(() => {
     try {
       return log?.occurredAt ? new Date(log.occurredAt).toLocaleString('ko-KR') : '';
     } catch {
@@ -102,7 +105,7 @@ export default function MealPlanDetailScreen() {
                   variant: 'danger',
                   onPress: async () => {
                     try {
-                      await deleteMealPlanLogRemote(log.id);
+                      await retryAsync(() => deleteMealPlanLogRemote(log.id), { retries: 1, delayMs: 700 });
                       navigation.goBack();
                     } catch (e: any) {
                       alert({
@@ -128,6 +131,13 @@ export default function MealPlanDetailScreen() {
             <ActivityIndicator color={colors.text} />
             <Text style={[styles.loadingText, { color: colors.textSecondary }]}>불러오는 중…</Text>
           </View>
+        ) : null}
+
+        {!loading && loadFailed ? (
+          <Card style={styles.errorCard} variant="elevated">
+            <Text style={[styles.errorTitle, { color: colors.text }]}>기록을 다시 불러오지 못했어요</Text>
+            <Text style={[styles.errorSub, { color: colors.textSecondary }]}>네트워크가 잠시 불안정할 수 있어요. 기존 화면 데이터는 유지했어요.</Text>
+          </Card>
         ) : null}
 
         <Card style={styles.metaCard} variant="elevated">
@@ -218,6 +228,21 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontSize: 13,
     fontWeight: '700',
+  },
+  errorCard: {
+    padding: 14,
+    marginTop: 16,
+    marginBottom: 12,
+  },
+  errorTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  errorSub: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: COLORS.textSecondary,
   },
   metaCard: {
     padding: 14,

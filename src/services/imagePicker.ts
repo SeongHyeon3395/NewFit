@@ -50,6 +50,7 @@ export async function pickPhotoFromCamera(params?: {
   maxWidth?: number;
   maxHeight?: number;
   quality?: number;
+  includeBase64?: boolean;
 }): Promise<PickedImage | null> {
   const result = await launchCamera({
     mediaType: 'photo',
@@ -57,7 +58,7 @@ export async function pickPhotoFromCamera(params?: {
     ...(typeof params?.maxWidth === 'number' ? { maxWidth: params.maxWidth } : null),
     ...(typeof params?.maxHeight === 'number' ? { maxHeight: params.maxHeight } : null),
     quality: (params?.quality ?? 0.84) as any,
-    includeBase64: false,
+    includeBase64: Boolean(params?.includeBase64),
   });
   return pickFirstAsset(result);
 }

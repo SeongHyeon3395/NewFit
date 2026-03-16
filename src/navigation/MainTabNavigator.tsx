@@ -3,12 +3,12 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MainTabParamList } from './types';
 import { AppIcon } from '../components/ui/AppIcon';
+import { MAIN_SHORTCUT_BAR_BOTTOM_PADDING, MAIN_SHORTCUT_BAR_HEIGHT, MAIN_SHORTCUT_BAR_TOP_PADDING } from '../components/ui/MainShortcutBar';
 import { useTheme } from '../theme/ThemeProvider';
 
 // Screens
 import ScanScreen from '../screens/main/ScanScreen';
 import MealScreen from '../screens/main/MealScreen';
-import ChatScreen from '../screens/main/ChatScreen';
 import CalendarScreen from '../screens/main/CalendarScreen.tsx';
 import ProfileScreen from '../screens/main/ProfileScreen';
 
@@ -29,9 +29,9 @@ export default function MainTabNavigator() {
           backgroundColor: colors.surface,
           borderTopWidth: 1,
           borderTopColor: colors.border,
-          height: 64 + insets.bottom,
-          paddingTop: 8,
-          paddingBottom: 8 + insets.bottom,
+          height: MAIN_SHORTCUT_BAR_HEIGHT + insets.bottom,
+          paddingTop: MAIN_SHORTCUT_BAR_TOP_PADDING,
+          paddingBottom: MAIN_SHORTCUT_BAR_BOTTOM_PADDING + insets.bottom,
           shadowColor: colors.shadow,
           shadowOffset: { width: 0, height: -6 },
           shadowOpacity: isDark ? 0.08 : 0,
@@ -61,14 +61,6 @@ export default function MainTabNavigator() {
         options={{
           tabBarLabel: '식단',
           tabBarIcon: ({ color }) => <AppIcon name="restaurant" color={color} size={24} />,
-        }}
-      />
-      <Tab.Screen
-        name="Chat"
-        component={ChatScreen}
-        options={{
-          tabBarLabel: '챗봇',
-          tabBarIcon: ({ color }) => <AppIcon name="smart-toy" color={color} size={24} />,
         }}
       />
       <Tab.Screen

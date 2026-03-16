@@ -25,6 +25,7 @@ import { useAppAlert } from '../../components/ui/AppAlert';
 import { useUserStore } from '../../store/userStore';
 import { consumeMonthlyMealPlanRemote, getMonthlyMealPlanCountRemote, getSessionUserId, insertMealPlanLogRemote, listMealPlanLogsRemote, listMonthlyUsedMealNamesRemote } from '../../services/userData';
 import { generateMealPlanRemote } from '../../services/mealPlan';
+import { retryAsync } from '../../services/retry';
 import type { MealPlanDay, MealPlanResult, MealPlanMode } from '../../types/mealPlan';
 import type { MealPlanLog } from '../../services/userData';
 import { getPlanLimits } from '../../services/plans';
@@ -121,7 +122,6 @@ export default function MealScreen() {
   const monthlyMealPlanLimit = getPlanLimits(profile?.plan_id).monthlyMealPlanLimit;
   const isMaster =
     (profile as any)?.plan_id === 'master' ||
-    profile?.id === 'local-master' ||
     profile?.username === 'master';
 
   const [usedMealPlanCount, setUsedMealPlanCount] = useState<number | null>(null);
@@ -133,6 +133,7 @@ export default function MealScreen() {
   const [result, setResult] = useState<MealPlanResult | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const inFlightRef = useRef(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   const [mealPlanLogs, setMealPlanLogs] = useState<MealPlanLog[]>([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
@@ -147,10 +148,10 @@ export default function MealScreen() {
 
     try {
       setIsLoadingLogs(true);
-      const logs = await listMealPlanLogsRemote(10);
+      const logs = await retryAsync(() => listMealPlanLogsRemote(10), { retries: 1, delayMs: 700 });
       setMealPlanLogs(logs);
     } catch {
-      setMealPlanLogs([]);
+      // keep current logs on transient failure
     } finally {
       setIsLoadingLogs(false);
     }
@@ -161,14 +162,15 @@ export default function MealScreen() {
     (async () => {
       const userId = await getSessionUserId().catch(() => null);
       if (!mounted) return;
+      setIsLoggedIn(Boolean(userId));
 
       // Load monthly quota usage (logged-in only)
       if (userId) {
         try {
-          const used = await getMonthlyMealPlanCountRemote().catch(() => null);
-          if (mounted) setUsedMealPlanCount(typeof used === 'number' ? used : 0);
+          const used = await retryAsync(() => getMonthlyMealPlanCountRemote(), { retries: 1, delayMs: 700 }).catch(() => null);
+          if (mounted && typeof used === 'number') setUsedMealPlanCount(used);
         } catch {
-          if (mounted) setUsedMealPlanCount(null);
+          // keep current count on transient failure
         }
       } else {
         setUsedMealPlanCount(null);
@@ -448,8 +450,16 @@ export default function MealScreen() {
 
   const ensureMealPlanQuotaOrAlert = async () => {
     const userId = await getSessionUserId().catch(() => null);
-    if (!userId) return true; // 로컬 모드 제한 없음
+    if (!userId) {
+      setIsLoggedIn(false);
+      alert({
+        title: '로그인 필요',
+        message: '식단 기록은 서버에만 저장돼요. 네트워크 연결을 확인한 뒤 로그인 후 다시 시도해주세요.',
+      });
+      return false;
+    }
     try {
+      setIsLoggedIn(true);
       const used = await getMonthlyMealPlanCountRemote();
       if (typeof used === 'number') {
         setUsedMealPlanCount(used);
@@ -617,7 +627,9 @@ export default function MealScreen() {
               text={
                 typeof remainingMealPlanThisMonth === 'number'
                   ? `남은 ${remainingMealPlanThisMonth}회`
-                  : '로컬 모드'
+                  : isLoggedIn
+                    ? '조회 중'
+                    : '로그인 필요'
               }
             />
           </View>

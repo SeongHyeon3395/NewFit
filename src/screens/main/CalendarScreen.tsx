@@ -13,6 +13,14 @@ import { ManualLogEditor } from '../../components/editor/ManualLogEditor';
 import { useUserStore } from '../../store/userStore';
 import type { ManualMealLog } from '../../types/user';
 import { useTheme } from '../../theme/ThemeProvider';
+import {
+  deleteManualMealLogRemote,
+  getSessionUserId,
+  insertManualMealLogRemote,
+  listManualMealLogsRemote,
+  updateManualMealLogRemote,
+  upsertManualMealLogsRemote,
+} from '../../services/userData';
 
 type MealType = ManualMealLog['mealType'];
 
@@ -157,6 +165,7 @@ export default function CalendarScreen() {
   const addManualMealLog = useUserStore(state => state.addManualMealLog);
   const updateManualMealLog = useUserStore(state => state.updateManualMealLog);
   const removeManualMealLog = useUserStore(state => state.removeManualMealLog);
+  const setManualMealLogs = useUserStore(state => state.setManualMealLogs);
 
   const today = useMemo(() => new Date(), []);
   const todayYmd = useMemo(() => toYmd(today), [today]);
@@ -170,9 +179,45 @@ export default function CalendarScreen() {
 
   const [isEditing, setIsEditing] = useState(false);
 
-  useEffect(() => {
-    void loadManualMealLogs();
-  }, [loadManualMealLogs]);
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+      void (async () => {
+        const userId = await getSessionUserId().catch(() => null);
+        if (!alive) return;
+
+        if (!userId) {
+          await loadManualMealLogs();
+          return;
+        }
+
+        const remoteLogs = await listManualMealLogsRemote(1000).catch(() => null);
+        if (!alive) return;
+
+        if (Array.isArray(remoteLogs)) {
+          await setManualMealLogs(remoteLogs);
+          return;
+        }
+
+        retryTimer = setTimeout(() => {
+          if (!alive) return;
+          void (async () => {
+            const retried = await listManualMealLogsRemote(1000).catch(() => null);
+            if (alive && Array.isArray(retried)) {
+              await setManualMealLogs(retried);
+            }
+          })();
+        }, 900);
+      })();
+
+      return () => {
+        alive = false;
+        if (retryTimer) clearTimeout(retryTimer);
+      };
+    }, [loadManualMealLogs, setManualMealLogs])
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -332,7 +377,7 @@ export default function CalendarScreen() {
   }, []);
 
   const openAddLog = useCallback(() => {
-    const userId = profile?.id || 'local';
+    const userId = profile?.id || '';
     const draft: ManualMealLog = {
       id: 'draft',
       userId,
@@ -356,23 +401,28 @@ export default function CalendarScreen() {
           submitLabel="추가"
           onClose={dismiss}
           onSubmit={async (updates) => {
+            const sessionUserId = await getSessionUserId().catch(() => null);
+            if (!sessionUserId) throw new Error('로그인 상태에서만 캘린더 기록을 저장할 수 있어요.');
+
             const newLog: ManualMealLog = {
               ...draft,
               ...updates,
               id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
-              userId,
+              userId: sessionUserId,
               date: selectedDate,
               timestamp: new Date().toISOString(),
             };
 
-            await addManualMealLog(newLog);
+            await insertManualMealLogRemote(newLog);
+            const remoteLogs = await listManualMealLogsRemote(1000);
+            await setManualMealLogs(remoteLogs);
             dismiss();
           }}
         />
       ),
       actions: [],
     });
-  }, [addManualMealLog, alert, dismiss, profile?.id, selectedDate]);
+  }, [alert, dismiss, profile?.id, selectedDate, setManualMealLogs]);
 
   const openEditLog = useCallback(
     (log: ManualMealLog) => {
@@ -385,7 +435,11 @@ export default function CalendarScreen() {
             submitLabel="저장"
             onClose={dismiss}
             onSubmit={async (updates) => {
-              await updateManualMealLog(log.id, updates);
+              const sessionUserId = await getSessionUserId().catch(() => null);
+              if (!sessionUserId) throw new Error('로그인 상태에서만 캘린더 기록을 수정할 수 있어요.');
+              await updateManualMealLogRemote(log.id, updates);
+              const remoteLogs = await listManualMealLogsRemote(1000);
+              await setManualMealLogs(remoteLogs);
               dismiss();
             }}
           />
@@ -393,7 +447,7 @@ export default function CalendarScreen() {
         actions: [],
       });
     },
-    [alert, dismiss, updateManualMealLog]
+    [alert, dismiss, setManualMealLogs]
   );
 
   const confirmDeleteLog = useCallback(
@@ -407,13 +461,19 @@ export default function CalendarScreen() {
             text: '삭제',
             variant: 'danger',
             onPress: () => {
-              void removeManualMealLog(log.id);
+              void (async () => {
+                const sessionUserId = await getSessionUserId().catch(() => null);
+                if (!sessionUserId) throw new Error('로그인 상태에서만 캘린더 기록을 삭제할 수 있어요.');
+                await deleteManualMealLogRemote(log.id);
+                const remoteLogs = await listManualMealLogsRemote(1000);
+                await setManualMealLogs(remoteLogs);
+              })();
             },
           },
         ],
       });
     },
-    [alert, removeManualMealLog]
+    [alert, setManualMealLogs]
   );
 
   const overCal = typeof goalCal === 'number' && selectedTotals.calories > goalCal;

@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 
@@ -8,9 +7,9 @@ import { COLORS, SPACING, RADIUS } from '../../constants/colors';
 import { Card } from '../../components/ui/Card';
 import { AppIcon } from '../../components/ui/AppIcon';
 import { getSessionUserId, fetchMyNotificationSettingsRemote, upsertMyNotificationSettingsRemote } from '../../services/userData';
+import { useAppAlert } from '../../components/ui/AppAlert';
+import { retryAsync } from '../../services/retry';
 import { useTheme } from '../../theme/ThemeProvider';
-
-const NOTIFICATION_SETTINGS_KEY = '@nutrimatch_notification_settings';
 
 type NotificationSettings = {
   enabled: boolean;
@@ -63,32 +62,45 @@ function ToggleRow({ title, description, value, onValueChange, disabled }: Toggl
 export default function NotificationSettingsScreen() {
   const navigation = useNavigation();
   const { colors } = useTheme();
+  const { alert } = useAppAlert();
   const [settings, setSettings] = useState<NotificationSettings>(DEFAULT_SETTINGS);
   const [loaded, setLoaded] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
-
-  const storageKey = useMemo(() => {
-    return userId ? `${NOTIFICATION_SETTINGS_KEY}:${userId}` : NOTIFICATION_SETTINGS_KEY;
-  }, [userId]);
+  const [isSaving, setIsSaving] = useState(false);
 
   const persist = useCallback(async (next: NotificationSettings) => {
+    if (!userId) {
+      alert({
+        title: '로그인 필요',
+        message: '알림 설정은 로그인한 계정에만 저장돼요. 다시 로그인 후 시도해주세요.',
+      });
+      return;
+    }
+
+    const previous = settings;
     setSettings(next);
+    setIsSaving(true);
     try {
-      // 1) 서버 우선 저장(로그인 상태)
-      if (userId) {
-        await upsertMyNotificationSettingsRemote({
+      await retryAsync(
+        () => upsertMyNotificationSettingsRemote({
           enabled: next.enabled,
           meal_reminder: next.mealReminder,
           weekly_summary: next.weeklySummary,
           tips: next.tips,
-        });
-      }
-      // 2) 로컬 캐시(오프라인/로딩용)
-      await AsyncStorage.setItem(storageKey, JSON.stringify(next));
+        }),
+        { retries: 1, delayMs: 700 }
+      );
     } catch (e) {
       console.error('Failed to save notification settings', e);
+      setSettings(previous);
+      alert({
+        title: '저장 실패',
+        message: '알림 설정 저장이 잠시 실패했어요. 네트워크를 확인한 뒤 다시 시도해주세요.',
+      });
+    } finally {
+      setIsSaving(false);
     }
-  }, [storageKey, userId]);
+  }, [alert, settings, userId]);
 
   useEffect(() => {
     let mounted = true;
@@ -98,34 +110,19 @@ export default function NotificationSettingsScreen() {
         if (!mounted) return;
         setUserId(uid);
 
-        // 1) 서버에서 먼저 로드(로그인 상태)
-        if (uid) {
-          try {
-            const remote = await fetchMyNotificationSettingsRemote();
-            if (!mounted) return;
-            setSettings({
-              enabled: Boolean(remote?.enabled),
-              mealReminder: Boolean(remote?.meal_reminder),
-              weeklySummary: Boolean(remote?.weekly_summary),
-              tips: Boolean(remote?.tips),
-            });
-            // 서버 값을 로컬에도 캐시
-            await AsyncStorage.setItem(`${NOTIFICATION_SETTINGS_KEY}:${uid}`, JSON.stringify({
-              enabled: Boolean(remote?.enabled),
-              mealReminder: Boolean(remote?.meal_reminder),
-              weeklySummary: Boolean(remote?.weekly_summary),
-              tips: Boolean(remote?.tips),
-            }));
-            return;
-          } catch {
-            // 서버 로드 실패 시 로컬로 폴백
-          }
+        if (!uid) {
+          setSettings(DEFAULT_SETTINGS);
+          return;
         }
 
-        // 2) 로컬 폴백
-        const stored = await AsyncStorage.getItem(uid ? `${NOTIFICATION_SETTINGS_KEY}:${uid}` : NOTIFICATION_SETTINGS_KEY);
+        const remote = await retryAsync(() => fetchMyNotificationSettingsRemote(), { retries: 1, delayMs: 700 });
         if (!mounted) return;
-        if (stored) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(stored) });
+        setSettings({
+          enabled: Boolean(remote?.enabled),
+          mealReminder: Boolean(remote?.meal_reminder),
+          weeklySummary: Boolean(remote?.weekly_summary),
+          tips: Boolean(remote?.tips),
+        });
       } catch (e) {
         console.error('Failed to load notification settings', e);
       } finally {
@@ -183,6 +180,7 @@ export default function NotificationSettingsScreen() {
             description={loaded ? '식단 기록과 요약 알림을 받을지 선택해요.' : '설정을 불러오는 중…'}
             value={settings.enabled}
             onValueChange={setEnabled}
+            disabled={!userId || isSaving}
           />
         </Card>
 
@@ -196,7 +194,7 @@ export default function NotificationSettingsScreen() {
             description="하루에 한 번, 식단 기록을 잊지 않게 알려줘요."
             value={settings.mealReminder}
             onValueChange={(v) => setField('mealReminder', v)}
-            disabled={subDisabled}
+            disabled={subDisabled || !userId || isSaving}
           />
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
           <ToggleRow
@@ -204,7 +202,7 @@ export default function NotificationSettingsScreen() {
             description="이번 주 기록을 한 번에 요약해서 알려줘요."
             value={settings.weeklySummary}
             onValueChange={(v) => setField('weeklySummary', v)}
-            disabled={subDisabled}
+            disabled={subDisabled || !userId || isSaving}
           />
           <View style={[styles.divider, { backgroundColor: colors.border }]} />
           <ToggleRow
@@ -212,7 +210,7 @@ export default function NotificationSettingsScreen() {
             description="목표(다이어트/유지 등)에 맞는 간단한 팁을 보내줘요."
             value={settings.tips}
             onValueChange={(v) => setField('tips', v)}
-            disabled={subDisabled}
+            disabled={subDisabled || !userId || isSaving}
           />
         </Card>
 

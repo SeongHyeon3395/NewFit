@@ -61,6 +61,9 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 # 기존 앱 제거 후 재설치
 adb uninstall com.front
 npx react-native run-android
+
+# 반복되면 자동 정리 후 재설치
+npm run android:clean
 ```
 
 ### 원인 점검
@@ -73,6 +76,7 @@ adb shell df -h
    - **Wipe Data** (용량/캐시가 꼬였을 때 가장 확실)
    - **Internal Storage / SD Card** 용량을 넉넉히(예: 8~16GB)로 설정
    - Quick Boot(스냅샷) 때문에 디스크가 계속 불어나면 **Cold Boot 위주로 사용**
+- 이미 `config.ini`에 `disk.dataPartition.size=12G`가 있어도, 기존 userdata 이미지가 작게 만들어져 있으면 실제 `/data`는 더 작을 수 있음. 이 경우 **Wipe Data**를 한 번 해줘야 새 크기가 반영됨.
 
 ### (고급) AVD 설정 파일 직접 수정
 `%USERPROFILE%\.android\avd\<AVD이름>.avd\config.ini`

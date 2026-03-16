@@ -10,6 +10,7 @@ import { useAppAlert } from '../../components/ui/AppAlert';
 import { useUserStore } from '../../store/userStore';
 import { getMonthlyMealPlanCountRemote, getMonthlyScanCountRemote, getMonthlyChatTokenStatusRemote } from '../../services/userData';
 import { getPlanLabel, getPlanLimits, normalizePlanId } from '../../services/plans';
+import { retryAsync } from '../../services/retry';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export default function SubscriptionScreen() {
@@ -29,19 +30,56 @@ export default function SubscriptionScreen() {
   useFocusEffect(
     useCallback(() => {
       let alive = true;
+      let retryTimer: ReturnType<typeof setTimeout> | null = null;
       (async () => {
-        const [scan, meal, chat] = await Promise.all([
-          getMonthlyScanCountRemote().catch(() => null),
-          getMonthlyMealPlanCountRemote().catch(() => null),
-          getMonthlyChatTokenStatusRemote().catch(() => null),
-        ]);
-        if (!alive) return;
-        setScanUsed(typeof scan === 'number' ? scan : null);
-        setMealUsed(typeof meal === 'number' ? meal : null);
-        setChatRemaining(typeof chat?.remaining === 'number' ? chat.remaining : null);
+        try {
+          const [scan, meal, chat] = await Promise.all([
+            retryAsync(() => getMonthlyScanCountRemote(), { retries: 1, delayMs: 700 }).catch(() => null),
+            retryAsync(() => getMonthlyMealPlanCountRemote(), { retries: 1, delayMs: 700 }).catch(() => null),
+            retryAsync(() => getMonthlyChatTokenStatusRemote(), { retries: 1, delayMs: 700 }).catch(() => null),
+          ]);
+          if (!alive) return;
+          setScanUsed((prev) => (typeof scan === 'number' ? scan : prev));
+          setMealUsed((prev) => (typeof meal === 'number' ? meal : prev));
+          setChatRemaining((prev) => (typeof chat?.remaining === 'number' ? chat.remaining : prev));
+
+          if (typeof scan !== 'number' || typeof meal !== 'number' || typeof chat?.remaining !== 'number') {
+            retryTimer = setTimeout(() => {
+              if (!alive) return;
+              void (async () => {
+                const [retryScan, retryMeal, retryChat] = await Promise.all([
+                  getMonthlyScanCountRemote().catch(() => null),
+                  getMonthlyMealPlanCountRemote().catch(() => null),
+                  getMonthlyChatTokenStatusRemote().catch(() => null),
+                ]);
+                if (!alive) return;
+                if (typeof retryScan === 'number') setScanUsed(retryScan);
+                if (typeof retryMeal === 'number') setMealUsed(retryMeal);
+                if (typeof retryChat?.remaining === 'number') setChatRemaining(retryChat.remaining);
+              })();
+            }, 900);
+          }
+        } catch {
+          if (!alive) return;
+          retryTimer = setTimeout(() => {
+            if (!alive) return;
+            void (async () => {
+              const [retryScan, retryMeal, retryChat] = await Promise.all([
+                getMonthlyScanCountRemote().catch(() => null),
+                getMonthlyMealPlanCountRemote().catch(() => null),
+                getMonthlyChatTokenStatusRemote().catch(() => null),
+              ]);
+              if (!alive) return;
+              if (typeof retryScan === 'number') setScanUsed(retryScan);
+              if (typeof retryMeal === 'number') setMealUsed(retryMeal);
+              if (typeof retryChat?.remaining === 'number') setChatRemaining(retryChat.remaining);
+            })();
+          }, 900);
+        }
       })();
       return () => {
         alive = false;
+        if (retryTimer) clearTimeout(retryTimer);
       };
     }, [])
   );
@@ -62,7 +100,7 @@ export default function SubscriptionScreen() {
           variant: 'danger',
           onPress: async () => {
             await updateProfile({ plan_id: 'free' as any });
-            const chat = await getMonthlyChatTokenStatusRemote().catch(() => null);
+            const chat = await retryAsync(() => getMonthlyChatTokenStatusRemote(), { retries: 1, delayMs: 700 }).catch(() => null);
             setChatRemaining(typeof chat?.remaining === 'number' ? chat.remaining : null);
             alert({ title: '완료', message: 'Free 플랜으로 전환되었어요.' });
           },

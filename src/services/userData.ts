@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import type { BodyLog, FoodGrade, FoodLog, UserProfile } from '../types/user';
+import type { BodyLog, FoodGrade, FoodLog, ManualMealLog, UserProfile } from '../types/user';
 import type { MealPlanMode, MealPlanResult } from '../types/mealPlan';
 
 export type NotificationSettingsRemote = {
@@ -62,6 +62,21 @@ type BodyLogRow = {
   weight: number | string | null;
   muscle_mass: number | string | null;
   body_fat: number | string | null;
+  occurred_at: string;
+};
+
+type ManualMealLogRow = {
+  id: string;
+  user_id: string;
+  date: string;
+  meal_type: string | null;
+  food_name: string | null;
+  calories: number | string | null;
+  carbs_g: number | string | null;
+  protein_g: number | string | null;
+  fat_g: number | string | null;
+  image_uri: string | null;
+  image_path?: string | null;
   occurred_at: string;
 };
 
@@ -217,6 +232,7 @@ export async function deleteFoodLogsRemote(ids: string[]) {
 const FOOD_IMAGES_BUCKET = 'food-images';
 const PROFILE_AVATARS_BUCKET = 'profile-avatars';
 const attemptedFoodImageRepairIds = new Set<string>();
+const attemptedManualMealImageRepairIds = new Set<string>();
 
 function toUploadableUri(uri: string) {
   const u = String(uri || '').trim();
@@ -293,17 +309,28 @@ function base64ToUint8Array(b64: string): Uint8Array {
   return out;
 }
 
-async function uploadFoodImage(fileUri: string, userId: string) {
+async function uploadFoodImage(fileUri: string, userId: string, base64?: string | null) {
   const client = requireSupabase();
-  const uploadUri = toUploadableUri(fileUri);
-  if (!uploadUri) throw new Error('이미지 URI가 비어있습니다.');
 
   let body: any = null;
-  try {
-    body = await blobFromUri(uploadUri);
-  } catch {
-    const resp = await fetch(uploadUri);
-    body = await resp.blob();
+  if (typeof base64 === 'string' && base64.trim()) {
+    try {
+      body = base64ToUint8Array(base64);
+    } catch {
+      body = null;
+    }
+  }
+
+  if (!body) {
+    const uploadUri = toUploadableUri(fileUri);
+    if (!uploadUri) throw new Error('이미지 URI가 비어있습니다.');
+
+    try {
+      body = await blobFromUri(uploadUri);
+    } catch {
+      const resp = await fetch(uploadUri);
+      body = await resp.blob();
+    }
   }
 
   const name = `${Date.now()}_${Math.random().toString(16).slice(2)}.jpg`;
@@ -384,6 +411,87 @@ function mapBodyLogRow(row: BodyLogRow): BodyLog {
   };
 }
 
+function mapManualMealLogRow(row: ManualMealLogRow): ManualMealLog {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    date: row.date,
+    mealType: ((row.meal_type as any) || 'breakfast') as ManualMealLog['mealType'],
+    foodName: row.food_name ?? undefined,
+    calories: parseNumeric(row.calories) ?? 0,
+    carbs_g: parseNumeric(row.carbs_g) ?? 0,
+    protein_g: parseNumeric(row.protein_g) ?? 0,
+    fat_g: parseNumeric(row.fat_g) ?? 0,
+    imageUri: row.image_uri ?? undefined,
+    timestamp: row.occurred_at,
+  };
+}
+
+async function prepareManualMealLogImageFields(log: Partial<ManualMealLog>, userId: string) {
+  const rawImageUri = typeof log.imageUri === 'string' ? log.imageUri.trim() : '';
+  const rawImageBase64 = typeof log.imageBase64 === 'string' ? log.imageBase64.trim() : '';
+
+  if (!rawImageUri) {
+    return { image_path: null as string | null, image_uri: null as string | null };
+  }
+
+  if (isLocalDeviceUri(rawImageUri)) {
+    const uploadedPath = await uploadFoodImage(rawImageUri, userId, rawImageBase64 || null);
+    return { image_path: uploadedPath, image_uri: null as string | null };
+  }
+
+  const normalizedPath = normalizeStoragePath(rawImageUri);
+  if (looksLikeStoragePath(normalizedPath)) {
+    return { image_path: normalizedPath, image_uri: null as string | null };
+  }
+
+  return { image_path: null as string | null, image_uri: rawImageUri };
+}
+
+async function tryRepairManualMealLogImage(row: ManualMealLogRow): Promise<string | null> {
+  const rowId = String(row?.id || '').trim();
+  const rowUserId = String(row?.user_id || '').trim();
+  const localUri = String(row?.image_uri || '').trim();
+
+  if (!rowId || !rowUserId || !isLocalDeviceUri(localUri)) return null;
+  if (attemptedManualMealImageRepairIds.has(rowId)) return null;
+  attemptedManualMealImageRepairIds.add(rowId);
+
+  let uploadedPath: string | null = null;
+  try {
+    uploadedPath = await uploadFoodImage(localUri, rowUserId);
+
+    const client = requireSupabase();
+    const { error: imagePathError } = await client
+      .from('manual_meal_logs')
+      .update({ image_path: uploadedPath, image_uri: null } as any)
+      .eq('id', rowId)
+      .eq('user_id', rowUserId);
+
+    if (imagePathError) {
+      const code = String((imagePathError as any)?.code || '');
+      const msg = String((imagePathError as any)?.message || '');
+      const isMissingImagePath = code === '42703' || code === 'PGRST204' || /image_path/i.test(msg);
+      if (!isMissingImagePath) throw imagePathError;
+
+      const { error: imageUriError } = await client
+        .from('manual_meal_logs')
+        .update({ image_uri: uploadedPath } as any)
+        .eq('id', rowId)
+        .eq('user_id', rowUserId);
+
+      if (imageUriError) throw imageUriError;
+    }
+
+    return await trySignedUrl(uploadedPath);
+  } catch {
+    if (uploadedPath) {
+      await tryRemoveFromBucket(FOOD_IMAGES_BUCKET, uploadedPath);
+    }
+    return null;
+  }
+}
+
 function isRemoteHttpUrl(value: unknown): value is string {
   return typeof value === 'string' && /^https?:\/\//i.test(value);
 }
@@ -428,7 +536,7 @@ function looksLikeStoragePath(value: unknown): value is string {
 
 function requireSupabase() {
   if (!supabase) {
-    throw new Error('Supabase 설정이 없습니다. (로컬 모드)');
+    throw new Error('서버 연결 설정이 없어 요청을 처리할 수 없어요. 네트워크와 앱 설정을 확인해주세요.');
   }
   return supabase;
 }
@@ -515,6 +623,47 @@ async function tryRepairFoodLogImage(row: FoodLogRow): Promise<string | null> {
       await tryRemoveFromBucket(FOOD_IMAGES_BUCKET, uploadedPath);
     }
     return null;
+  }
+}
+
+export async function attachFoodLogImageRemote(params: { logId: string; imageUri: string; imageBase64?: string | null; userId?: string | null }) {
+  const rowId = String(params.logId || '').trim();
+  const localUri = String(params.imageUri || '').trim();
+  const rowUserId = String(params.userId || '').trim() || (await getSessionUserId()) || '';
+
+  if (!rowId) throw new Error('로그 ID가 비어있습니다.');
+  if (!rowUserId) throw new Error('로그인이 필요합니다.');
+  if (!isLocalDeviceUri(localUri)) throw new Error('로컬 이미지 URI가 아닙니다.');
+
+  const uploadedPath = await uploadFoodImage(localUri, rowUserId, params.imageBase64 ?? null);
+  const client = requireSupabase();
+
+  try {
+    const { error: imagePathError } = await client
+      .from('food_logs')
+      .update({ image_path: uploadedPath } as any)
+      .eq('id', rowId)
+      .eq('user_id', rowUserId);
+
+    if (imagePathError) {
+      const code = String((imagePathError as any)?.code || '');
+      const msg = String((imagePathError as any)?.message || '');
+      const isMissingImagePath = code === '42703' || code === 'PGRST204' || /image_path/i.test(msg);
+      if (!isMissingImagePath) throw imagePathError;
+
+      const { error: imageUriError } = await client
+        .from('food_logs')
+        .update({ image_uri: uploadedPath } as any)
+        .eq('id', rowId)
+        .eq('user_id', rowUserId);
+
+      if (imageUriError) throw imageUriError;
+    }
+
+    return await trySignedUrl(uploadedPath);
+  } catch (error) {
+    await tryRemoveFromBucket(FOOD_IMAGES_BUCKET, uploadedPath);
+    throw error;
   }
 }
 
@@ -720,19 +869,11 @@ export async function updateMyProfileAvatarRemote(params: {
   return { profile: mapped, signedUrl };
 }
 
-export async function insertFoodLogRemote(log: Omit<FoodLog, 'id'> & { id?: string }) {
+export async function insertFoodLogRemote(log: Omit<FoodLog, 'id'> & { id?: string; imageBase64?: string | null }) {
   const userId = await getSessionUserId();
   if (!userId) throw new Error('로그인이 필요합니다.');
 
-  let imagePath: string | null = null;
-  let imageUriFallback: string | null = null;
-  try {
-    imagePath = await uploadFoodImage(log.imageUri, userId);
-  } catch {
-    // Storage 설정/권한 문제 등으로 업로드 실패 시에도 기록 자체는 남김(기기간 사진 유지는 불가)
-    imagePath = null;
-    imageUriFallback = log.imageUri;
-  }
+  const imagePath = await uploadFoodImage(log.imageUri, userId, log.imageBase64 ?? null);
 
   const id = (log as any)?.id ? String((log as any).id) : uuidv4();
   const row: Record<string, any> = {
@@ -744,7 +885,6 @@ export async function insertFoodLogRemote(log: Omit<FoodLog, 'id'> & { id?: stri
   };
 
   // Optional columns: older DBs might not have these yet.
-  if (imageUriFallback) row.image_uri = imageUriFallback;
   if (imagePath) row.image_path = imagePath;
   if (log.notes != null) row.notes = log.notes;
 
@@ -755,7 +895,7 @@ export async function insertFoodLogRemote(log: Omit<FoodLog, 'id'> & { id?: stri
   const mapped: FoodLog = {
     id,
     userId,
-    imageUri: imageUriFallback || '',
+    imageUri: '',
     analysis: log.analysis,
     mealType: log.mealType,
     timestamp: log.timestamp,
@@ -990,6 +1130,29 @@ export async function insertBodyLogRemote(log: Omit<BodyLog, 'id'>) {
   return mapBodyLogRow(data as BodyLogRow);
 }
 
+export async function updateBodyLogRemote(id: string, updates: Partial<Omit<BodyLog, 'id' | 'userId'>>) {
+  const userId = await getSessionUserId();
+  if (!userId) throw new Error('로그인이 필요합니다.');
+
+  const row: Record<string, any> = {};
+  if (updates.weight !== undefined) row.weight = updates.weight;
+  if (updates.muscleMass !== undefined) row.muscle_mass = updates.muscleMass ?? null;
+  if (updates.bodyFat !== undefined) row.body_fat = updates.bodyFat ?? null;
+  if (updates.timestamp !== undefined) row.occurred_at = updates.timestamp;
+
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from('body_logs')
+    .update(row)
+    .eq('id', id)
+    .eq('user_id', userId)
+    .select('*')
+    .single();
+
+  if (error) throw error;
+  return mapBodyLogRow(data as BodyLogRow);
+}
+
 export async function listBodyLogsRemote(limit = 50) {
   const userId = await getSessionUserId();
   if (!userId) throw new Error('로그인이 필요합니다.');
@@ -1004,6 +1167,178 @@ export async function listBodyLogsRemote(limit = 50) {
 
   if (error) throw error;
   return (data as BodyLogRow[]).map(mapBodyLogRow);
+}
+
+export async function listManualMealLogsRemote(limit = 500) {
+  const userId = await getSessionUserId();
+  if (!userId) throw new Error('로그인이 필요합니다.');
+
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from('manual_meal_logs')
+    .select('*')
+    .eq('user_id', userId)
+    .order('date', { ascending: false })
+    .order('occurred_at', { ascending: false })
+    .limit(limit);
+
+  if (error) throw error;
+
+  const rows = ((data as ManualMealLogRow[]) || []);
+  const logs = rows.map(mapManualMealLogRow);
+
+  await Promise.all(
+    rows.map(async (row, idx) => {
+      const imagePath = normalizeStoragePath(row.image_path);
+      const imageUri = typeof row.image_uri === 'string' ? row.image_uri.trim() : '';
+
+      if (imagePath) {
+        try {
+          logs[idx].imageUri = await trySignedUrl(imagePath);
+          return;
+        } catch {
+          // ignore
+        }
+      }
+
+      if (isRemoteHttpUrl(imageUri)) {
+        logs[idx].imageUri = imageUri;
+        return;
+      }
+
+      if (looksLikeStoragePath(imageUri)) {
+        try {
+          logs[idx].imageUri = await trySignedUrl(normalizeStoragePath(imageUri));
+          return;
+        } catch {
+          // ignore
+        }
+      }
+
+      if (imageUri) {
+        if (isLocalDeviceUri(imageUri)) {
+          const repairedUrl = await tryRepairManualMealLogImage(row);
+          logs[idx].imageUri = repairedUrl || imageUri;
+          return;
+        }
+
+        logs[idx].imageUri = imageUri;
+      }
+    })
+  );
+
+  return logs;
+}
+
+export async function upsertManualMealLogsRemote(logs: ManualMealLog[]) {
+  const userId = await getSessionUserId();
+  if (!userId) throw new Error('로그인이 필요합니다.');
+  if (!Array.isArray(logs) || logs.length === 0) return;
+
+  const rows = await Promise.all(
+    logs.map(async (log) => {
+      const imageFields = await prepareManualMealLogImageFields(log, userId);
+      return {
+        id: String(log.id),
+        user_id: userId,
+        date: String(log.date),
+        meal_type: log.mealType,
+        food_name: log.foodName ?? null,
+        calories: Number(log.calories) || 0,
+        carbs_g: Number(log.carbs_g) || 0,
+        protein_g: Number(log.protein_g) || 0,
+        fat_g: Number(log.fat_g) || 0,
+        image_uri: imageFields.image_uri,
+        image_path: imageFields.image_path,
+        occurred_at: log.timestamp,
+      };
+    })
+  );
+
+  const client = requireSupabase();
+  const { error } = await client.from('manual_meal_logs').upsert(rows as any, { onConflict: 'id' });
+  if (error) throw error;
+}
+
+export async function insertManualMealLogRemote(log: ManualMealLog) {
+  const userId = await getSessionUserId();
+  if (!userId) throw new Error('로그인이 필요합니다.');
+
+  const imageFields = await prepareManualMealLogImageFields(log, userId);
+  const row = {
+    id: String(log.id),
+    user_id: userId,
+    date: log.date,
+    meal_type: log.mealType,
+    food_name: log.foodName ?? null,
+    calories: Number(log.calories) || 0,
+    carbs_g: Number(log.carbs_g) || 0,
+    protein_g: Number(log.protein_g) || 0,
+    fat_g: Number(log.fat_g) || 0,
+    image_uri: imageFields.image_uri,
+    image_path: imageFields.image_path,
+    occurred_at: log.timestamp,
+  };
+
+  const client = requireSupabase();
+  const { data, error } = await client.from('manual_meal_logs').insert(row).select('*').single();
+  if (error) throw error;
+  const mapped = mapManualMealLogRow(data as ManualMealLogRow);
+  if (imageFields.image_path) {
+    mapped.imageUri = await trySignedUrl(imageFields.image_path).catch(() => mapped.imageUri);
+  }
+  return mapped;
+}
+
+export async function updateManualMealLogRemote(id: string, updates: Partial<ManualMealLog>) {
+  const userId = await getSessionUserId();
+  if (!userId) throw new Error('로그인이 필요합니다.');
+
+  const row: Record<string, any> = {};
+  if (updates.date !== undefined) row.date = updates.date;
+  if (updates.mealType !== undefined) row.meal_type = updates.mealType;
+  if (updates.foodName !== undefined) row.food_name = updates.foodName ?? null;
+  if (updates.calories !== undefined) row.calories = Number(updates.calories) || 0;
+  if (updates.carbs_g !== undefined) row.carbs_g = Number(updates.carbs_g) || 0;
+  if (updates.protein_g !== undefined) row.protein_g = Number(updates.protein_g) || 0;
+  if (updates.fat_g !== undefined) row.fat_g = Number(updates.fat_g) || 0;
+  if (updates.imageUri !== undefined || updates.imageBase64 !== undefined) {
+    const imageFields = await prepareManualMealLogImageFields(updates, userId);
+    row.image_uri = imageFields.image_uri;
+    row.image_path = imageFields.image_path;
+  }
+  if (updates.timestamp !== undefined) row.occurred_at = updates.timestamp;
+
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from('manual_meal_logs')
+    .update(row)
+    .eq('id', id)
+    .eq('user_id', userId)
+    .select('*')
+    .single();
+
+  if (error) throw error;
+  const mapped = mapManualMealLogRow(data as ManualMealLogRow);
+  const imagePath = normalizeStoragePath((data as ManualMealLogRow)?.image_path);
+  if (imagePath) {
+    mapped.imageUri = await trySignedUrl(imagePath).catch(() => mapped.imageUri);
+  }
+  return mapped;
+}
+
+export async function deleteManualMealLogRemote(id: string) {
+  const userId = await getSessionUserId();
+  if (!userId) throw new Error('로그인이 필요합니다.');
+
+  const client = requireSupabase();
+  const { error } = await client
+    .from('manual_meal_logs')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', userId);
+
+  if (error) throw error;
 }
 
 export async function fetchMyNotificationSettingsRemote() {
