@@ -17,6 +17,7 @@ function jsonResponse(body: any, status = 200) {
 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
 const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+const GEMINI_OPENAI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai';
 
 function getBearerToken(req: Request) {
   const h = req.headers.get('authorization') || req.headers.get('Authorization') || '';
@@ -26,25 +27,29 @@ function getBearerToken(req: Request) {
 
 function buildSystemPrompt() {
   return [
-    '너는 뉴핏의 “사용자 맞춤 헬스케어 AI 코치”야.',
-    '목표는 사용자가 더 건강한 선택을 할 수 있게 식단/운동/생활습관을 현실적으로 코칭하는 것.',
+    '너는 뉴핏 앱의 친절한 AI 어시스턴트야.',
+    '목표는 사용자의 일반적인 질문에 자연스럽고 유용하게 답하되, 앱 정책상 금지된 주제는 정중히 거절하는 것.',
     '',
-    '중요(기능 분리):',
-    '- 이 챗봇은 “다음 식사/메뉴 추천”, “식단표/식사 계획 제안”을 하지 않는다.',
-    '- 사용자가 식사 추천을 요구하더라도, 식사 추천 대신 섭취 기록/목표 대비 분석과 개선 원칙(일반 가이드)만 제공한다.',
-    '- 식사/식단 추천이 필요하면 앱의 “식단” 기능을 사용하라고 짧게 안내한다.',
+    '대화 원칙:',
+    '- 인사, 일상 대화, 간단한 정보 설명, 일반 상식성 질문에는 자연스럽게 답한다.',
+    '- 질문이 다소 모호해도 가능한 범위에서 먼저 도와주고, 필요한 경우 짧게 되물어 명확화한다.',
+    '- 답변은 짧고 이해하기 쉽게 작성한다.',
     '',
-    '범위(매우 중요):',
-    '- 건강, 식단, 음식/영양(먹어도 되는지/안 되는지, 대체 음식, 칼로리/매크로, 알레르기, 생활습관, 운동) 질문에만 답한다.',
-    '- 위 범위를 벗어나면 반드시 아래 문장과 비슷하게 거절한다:',
-    '  "죄송하지만 저는 건강/식단/음식 관련 질문에만 답할 수 있어요."',
-    '- 오프토픽일 때는 다른 내용은 답하지 말고, 건강/식단/음식 질문으로 바꿔달라고 안내한다.',
+    '금지 주제(반드시 거절):',
+    '- 코딩/프로그래밍/개발 디버깅',
+    '- 정치/사회 이슈 논평 및 시사 토론',
+    '- 유튜브 채널/영상 평가 및 추천',
+    '- 특정 인물/집단에 대한 평가, 비방, 평판 판단',
+    '- 잔인하거나 폭력적인 내용, 불법 행위 조장, 성적으로 부적절한 내용',
+    '- 증오/차별/괴롭힘 등 유해 콘텐츠',
+    '- 위 항목은 자세한 설명 없이도 짧고 정중하게 거절한다.',
     '',
-    '규칙:',
-    '- 질문에 대해 짧고 실행 가능한 답을 먼저 준다.',
-    '- 가능하면 선택지(2~4개)로 제시한다.',
-    '- 사용자의 목표(감량/유지/증량), 알레르기, 선호가 주어지면 반드시 반영한다.',
+    '건강/식단 질문이 오면:',
+    '- 기존처럼 실용적인 가이드를 제공한다.',
     '- 의학적 진단/처방은 하지 말고, 위험 신호가 있으면 전문가 상담을 권한다.',
+    '',
+    '거절 문구 규칙:',
+    '- 금지 주제에는 "해당 주제는 도와드릴 수 없어요. 다른 일반 질문이나 건강/식단 질문은 도와드릴게요."와 유사한 짧은 문구를 사용한다.',
     '- 사용자가 쓴 언어를 최대한 따라 답한다. 영어/일본어/중국어 질문이면 해당 언어로 답한다.',
     '- 한국어와 영어가 섞인 질문이면 너무 딱딱하게 한 언어만 고집하지 말고, 사용자가 이해하기 쉬운 자연스러운 언어로 답한다.',
     '- 언어가 불명확하면 기본은 한국어로 답한다.',
@@ -77,71 +82,62 @@ function normalizeText(s: any) {
     .trim();
 }
 
-function isAllowedHealthTopic(message: string) {
+function isDisallowedTopic(message: string) {
   const t = normalizeText(message);
   if (!t) return false;
 
-  // 허용 키워드(health/food/diet/exercise)
-  const allow = [
-    '건강', '헬스', '운동', '식단', '다이어트', '감량', '유지', '증량', '체중', '몸무게', '근육', '체지방',
-    '영양', '영양성분', '칼로리', 'kcal', '매크로', '탄수', '탄수화물', '단백질', '지방', '나트륨', '당', '당류',
-    '알레르기', '알러지', '혈당', '혈압', '콜레스테롤', '포만감', '소화',
-    '음식', '먹어', '먹으면', '먹어도', '먹지', '피해야', '추천', '대체', '간식', '아침', '점심', '저녁',
-    'meal', 'diet', 'food', 'nutrition', 'calorie', 'calories', 'protein', 'carb', 'carbs', 'fat', 'sugar', 'sodium',
-    'cholesterol', 'fiber', 'allergy', 'allergies', 'digest', 'digestion', 'workout', 'exercise', 'health',
-    'lose weight', 'gain weight', 'maintain weight', 'body fat', 'muscle', 'can i eat', 'should i eat', 'is this healthy',
-    'healthy', 'snack', 'breakfast', 'lunch', 'dinner', 'ingredient', 'ingredients',
-    '健康', '食事', 'ダイエット', '運動', 'カロリー', '栄養', 'たんぱく質', 'タンパク質', '炭水化物', '脂質', '脂肪',
-    'アレルギー', '食べて', '食べても', '食べる', '朝ごはん', '昼ごはん', '夕ごはん', '筋トレ',
-    '健康', '饮食', '减肥', '增肌', '运动', '卡路里', '热量', '营养', '蛋白质', '碳水', '脂肪', '过敏',
-    '可以吃', '能吃', '早餐', '午餐', '晚餐', '零食',
+  const denyCoding = [
+    '코딩', '프로그래밍', '개발', '디버깅', '자바스크립트', '타입스크립트', '리액트', '파이썬', '코드',
+    'coding', 'programming', 'debug', 'javascript', 'typescript', 'python', 'react',
+  ];
+  const denySocialIssue = [
+    '정치', '사회 이슈', '시사', '선거', '정당', '이념', 'politics', 'political', 'social issue', 'news debate',
+  ];
+  const denyYoutube = [
+    '유튜브', 'youtube', 'youtuber', '영상 평가', '채널 평가', '영상 추천',
+  ];
+  const denyPersonEval = [
+    '사람 평가', '인물 평가', '평판', '누가 더 낫', '급 나누기', '외모 평가',
+    'rate this person', 'judge this person', 'reputation',
+  ];
+  const denyHarmful = [
+    '살인', '자해', '폭탄', '테러', '고문', '잔인', '폭력', '학대',
+    'kill', 'murder', 'self-harm', 'suicide', 'bomb', 'terror', 'torture', 'violent',
+    '마약 제조', '불법 해킹', '피싱', '사기', 'weapon',
+    '혐오', '인종차별', '성차별', '증오', '괴롭힘', 'harass', 'hate', 'racist', 'sexist',
+    '포르노', '성착취', '강간', '아동 성', 'porn', 'sexual abuse',
   ];
 
-  // 명확히 오프토픽을 시사하는 키워드(보수적으로)
-  const deny = [
-    '코딩', '프로그래밍', '자바스크립트', '파이썬', '리액트', 'react', 'typescript', '버그', '에러', '컴파일',
-    '주식', '코인', '비트코인', '투자', '부동산',
-    '연애', '이별', '썸',
-    '법률', '소송', '계약',
-    '여행', '항공', '호텔',
-    '게임', '롤', '오버워치',
-    '영화', '드라마',
-    '번역', '숙제', '과제',
-  ];
-
-  if (allow.some((k) => t.includes(k))) return true;
-  if (deny.some((k) => t.includes(k))) return false;
-
-  // 키워드가 애매하면 안전하게 거절(요구사항: 음식/건강에 대해서만 답변)
-  return false;
+  const blockedGroups = [denyCoding, denySocialIssue, denyYoutube, denyPersonEval, denyHarmful];
+  return blockedGroups.some((arr) => arr.some((k) => t.includes(k)));
 }
 
 function offTopicReply(message?: string) {
   const lang = detectReplyLanguage(message || '');
   if (lang === 'en') {
-    return 'Sorry, I can only help with health, diet, food, nutrition, and exercise related questions.\nFor example: “Can I eat this?”, “Is this meal healthy?”, or “What is a good high-protein snack?”';
+    return 'Sorry, I cannot help with that topic. I can still help with general daily questions or health/diet related questions.';
   }
   if (lang === 'ja') {
-    return '申し訳ありませんが、健康・食事・栄養・運動に関する質問にのみお答えできます。\n例えば: 「これは食べてもいい？」「この食事はヘルシー？」「高たんぱくなおやつは何？」';
+    return '申し訳ありませんが、その話題には対応できません。一般的な日常の質問や健康・食事の質問ならお手伝いできます。';
   }
   if (lang === 'zh') {
-    return '抱歉，我只能回答与健康、饮食、营养和运动相关的问题。\n例如：“这个可以吃吗？”、“这顿饭健康吗？”、“有什么高蛋白零食推荐？”';
+    return '抱歉，这个话题我无法协助。你可以继续问日常通用问题，或健康/饮食相关问题。';
   }
-  return '죄송하지만 저는 건강/식단/음식 관련 질문에만 답할 수 있어요.\n예) “닭가슴살 대신 뭐가 좋아요?”, “오늘 점심 뭐 먹을까요?”, “이 음식 먹어도 될까요?”';
+  return '죄송하지만 해당 주제는 도와드릴 수 없어요. 다른 일반 질문이나 건강/식단 질문은 도와드릴게요.';
 }
 
 function toGeminiContents(history: any[], latestUserMessage: string) {
   const contents = [] as any[];
 
   for (const m of history || []) {
-    const role = m?.role === 'assistant' ? 'model' : 'user';
+    const role = m?.role === 'assistant' ? 'assistant' : 'user';
     const text = String(m?.text || '').trim();
     if (!text) continue;
-    contents.push({ role, parts: [{ text }] });
+    contents.push({ role, content: text });
   }
 
   const last = String(latestUserMessage || '').trim();
-  if (last) contents.push({ role: 'user', parts: [{ text: last }] });
+  if (last) contents.push({ role: 'user', content: last });
 
   return contents;
 }
@@ -150,20 +146,21 @@ async function callGeminiText({ system, contents, model }: { system: string; con
   const apiKey = Deno.env.get('GEMINI_API_KEY') || '';
   if (!apiKey) throw new Error('GEMINI_API_KEY가 설정되어 있지 않습니다.');
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const url = `${GEMINI_OPENAI_BASE_URL}/chat/completions`;
   const body = {
-    systemInstruction: { parts: [{ text: system }] },
-    contents,
-    generationConfig: {
-      temperature: 0.6,
-      topP: 0.9,
-      maxOutputTokens: 600,
-    },
+    model,
+    messages: [{ role: 'system', content: system }, ...contents],
+    temperature: 0.6,
+    top_p: 0.9,
+    max_tokens: 600,
   };
 
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
     body: JSON.stringify(body),
   });
 
@@ -174,14 +171,13 @@ async function callGeminiText({ system, contents, model }: { system: string; con
   }
 
   const text =
-    json?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text).filter(Boolean).join('') ||
-    json?.candidates?.[0]?.content?.parts?.[0]?.text ||
+    json?.choices?.[0]?.message?.content ||
     '';
 
   return {
     text: String(text || '').trim(),
     raw: json,
-    totalTokens: Number(json?.usageMetadata?.totalTokenCount ?? 0) || 0,
+    totalTokens: Number(json?.usage?.total_tokens ?? 0) || 0,
   };
 }
 
@@ -255,11 +251,11 @@ serve(async (req: Request) => {
       return jsonResponse({ ok: false, message: 'message가 비어있습니다.' }, 400);
     }
 
-    if (!isAllowedHealthTopic(message)) {
+    if (isDisallowedTopic(message)) {
       return jsonResponse({ ok: true, data: { reply: offTopicReply(message), model: 'policy' } }, 200);
     }
 
-    const model = Deno.env.get('GEMINI_TEXT_MODEL') || Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash-lite';
+    const model = Deno.env.get('GEMINI_TEXT_MODEL') || Deno.env.get('GEMINI_MODEL') || 'gemini-3.1-flash-lite';
 
     const system = buildSystemPrompt();
 

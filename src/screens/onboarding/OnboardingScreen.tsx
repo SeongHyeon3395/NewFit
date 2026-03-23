@@ -2,10 +2,16 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Dimensions,
+  Keyboard,
+  KeyboardEvent,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
+  TouchableWithoutFeedback,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -17,7 +23,7 @@ import { RootStackParamList } from '../../navigation/types';
 import { AppIcon } from '../../components/ui/AppIcon';
 import { Button } from '../../components/ui/Button';
 import { COLORS, RADIUS, SPACING } from '../../constants/colors';
-import { ALL_ALLERGENS, BODY_GOALS, HEALTH_DIETS, LIFESTYLE_DIETS } from '../../constants';
+import { BODY_GOALS, HEALTH_DIETS, LIFESTYLE_DIETS } from '../../constants';
 import { useUserStore } from '../../store/userStore';
 import type { BodyGoalType, HealthDietType, LifestyleDietType, UserProfile } from '../../types/user';
 import { fetchMyAppUser, getSessionUserId, insertBodyLogRemote } from '../../services/userData';
@@ -55,10 +61,6 @@ export default function OnboardingScreen() {
         if (!mounted) return;
         await setProfile(remote as any);
         if (remote?.onboardingCompleted) {
-          alert({
-            title: '이미 설정 완료',
-            message: '신체정보가 이미 저장되어 있어요.\n변경은 내 정보 > 수정에서 할 수 있습니다.',
-          });
           navigation.replace('MainTab', { screen: 'Scan' } as any);
         }
       } catch {
@@ -85,14 +87,26 @@ export default function OnboardingScreen() {
   const [healthDiet, setHealthDiet] = useState<HealthDietType | null>(() => (profile?.healthDiet as any) ?? null);
   const [lifestyleDiet, setLifestyleDiet] = useState<LifestyleDietType | null>(() => (profile?.lifestyleDiet as any) ?? null);
   const [selectedAllergens, setSelectedAllergens] = useState<string[]>(() => (Array.isArray(profile?.allergens) ? profile!.allergens : []));
-  const [allergenSearch, setAllergenSearch] = useState('');
   const [customAllergen, setCustomAllergen] = useState('');
+  const [keyboardInset, setKeyboardInset] = useState(0);
 
-  const [currentWeightText, setCurrentWeightText] = useState('');
-  const [targetWeightText, setTargetWeightText] = useState('');
-  const [heightText, setHeightText] = useState('');
-  const [ageText, setAgeText] = useState('');
-  const [gender, setGender] = useState<'male' | 'female' | ''>('');
+  const [currentWeightText, setCurrentWeightText] = useState(() =>
+    typeof profile?.currentWeight === 'number' ? String(profile.currentWeight) : ''
+  );
+  const [targetWeightText, setTargetWeightText] = useState(() =>
+    typeof profile?.targetWeight === 'number' ? String(profile.targetWeight) : ''
+  );
+  const [heightText, setHeightText] = useState(() =>
+    typeof profile?.height === 'number' ? String(profile.height) : ''
+  );
+  const [ageText, setAgeText] = useState(() =>
+    typeof profile?.age === 'number' ? String(profile.age) : ''
+  );
+  const [gender, setGender] = useState<'male' | 'female' | ''>(() => {
+    const g = String(profile?.gender ?? '').toLowerCase();
+    if (g === 'male' || g === 'female') return g;
+    return '';
+  });
 
   useEffect(() => {
     if (!profile) return;
@@ -102,6 +116,25 @@ export default function OnboardingScreen() {
     if (!lifestyleDiet && profile.lifestyleDiet) setLifestyleDiet(profile.lifestyleDiet as any);
     if (selectedAllergens.length === 0 && Array.isArray(profile.allergens) && profile.allergens.length > 0) {
       setSelectedAllergens(profile.allergens);
+    }
+
+    if (!currentWeightText && typeof profile.currentWeight === 'number') {
+      setCurrentWeightText(String(profile.currentWeight));
+    }
+    if (!targetWeightText && typeof profile.targetWeight === 'number') {
+      setTargetWeightText(String(profile.targetWeight));
+    }
+    if (!heightText && typeof profile.height === 'number') {
+      setHeightText(String(profile.height));
+    }
+    if (!ageText && typeof profile.age === 'number') {
+      setAgeText(String(profile.age));
+    }
+    if (!gender) {
+      const g = String(profile.gender ?? '').toLowerCase();
+      if (g === 'male' || g === 'female') {
+        setGender(g);
+      }
     }
   }, [bodyGoal, healthDiet, lifestyleDiet, profile, selectedAllergens.length]);
 
@@ -114,6 +147,28 @@ export default function OnboardingScreen() {
       useNativeDriver: false,
     }).start();
   }, [progressAnim, step]);
+
+  useEffect(() => {
+    const computeInset = (e?: KeyboardEvent) => {
+      if (!e?.endCoordinates?.height) return 0;
+      return Math.max(0, e.endCoordinates.height - 34);
+    };
+
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const onShow = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardInset(computeInset(e));
+    });
+    const onHide = Keyboard.addListener(hideEvent, () => {
+      setKeyboardInset(0);
+    });
+
+    return () => {
+      onShow.remove();
+      onHide.remove();
+    };
+  }, []);
 
   const handleNext = async () => {
     if (step === 1 && !bodyGoal) return;
@@ -193,9 +248,9 @@ export default function OnboardingScreen() {
         id: sessionUserId,
         email: '',
         name: '사용자',
-        bodyGoal: bodyGoal!,
-        healthDiet: healthDiet!,
-        lifestyleDiet: lifestyleDiet!,
+        bodyGoal: bodyGoal ?? 'maintenance',
+        healthDiet: healthDiet ?? 'none_health',
+        lifestyleDiet: lifestyleDiet ?? 'none_lifestyle',
         allergens: selectedAllergens,
         onboardingCompleted: false,
         createdAt: now,
@@ -240,9 +295,11 @@ export default function OnboardingScreen() {
   const addCustomAllergen = () => {
     if (!customAllergen.trim()) return;
     const next = customAllergen.trim();
-    if (!selectedAllergens.includes(next)) {
-      setSelectedAllergens(prev => [...prev, next]);
-    }
+    const normalized = next.toLowerCase();
+    setSelectedAllergens(prev => {
+      const exists = prev.some(a => a.trim().toLowerCase() === normalized);
+      return exists ? prev : [...prev, next];
+    });
     setCustomAllergen('');
   };
 
@@ -336,8 +393,6 @@ export default function OnboardingScreen() {
   );
 
   const renderStep4 = () => {
-    const filteredAllergens = ALL_ALLERGENS.filter(a => a.includes(allergenSearch));
-
     return (
       <View>
         <Text style={styles.stepTitle}>추가 정보를 입력하세요</Text>
@@ -417,103 +472,109 @@ export default function OnboardingScreen() {
         </View>
 
         <View style={styles.sectionBlock}>
-          <Text style={styles.sectionTitle}>알레르기 성분 (선택)</Text>
-          <Text style={styles.sectionDesc}>입력하면 위험 성분을 더 잘 감지할 수 있어요. 해당되는 성분이 없으면 비워도 됩니다.</Text>
-        </View>
-
-        <View style={styles.searchContainer}>
-          <View style={styles.searchIcon}>
-            <AppIcon name="search" size={20} color={COLORS.textGray} />
+          <View style={styles.sectionTitleRow}>
+            <View style={styles.sectionTitleIconWrap}>
+              <AppIcon name="bolt" size={16} color={COLORS.primary} />
+            </View>
+            <Text style={styles.sectionTitle}>알레르기 성분 (선택)</Text>
           </View>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="알레르기 성분 검색... (예: 땅콩, 우유)"
-            value={allergenSearch}
-            onChangeText={setAllergenSearch}
-          />
-        </View>
+          <Text style={styles.sectionDesc}>선택 목록은 제거했고, 원하는 성분을 직접 추가하는 방식으로 입력해요.</Text>
 
-        <View style={styles.customInputContainer}>
-          <Text style={styles.customInputLabel}>직접 추가하기 (목록에 없는 성분)</Text>
+          <View style={styles.customInputContainer}>
+            <Text style={styles.customInputLabel}>직접 추가하기</Text>
+            <Text style={styles.customInputHint}>예: 땅콩, 우유, 새우, 고수 등</Text>
+          </View>
+
           <View style={styles.customInputRow}>
             <TextInput
               style={styles.customInput}
-              placeholder="예: 파슬리, 고수, 민트 등"
+              placeholder="알레르기 성분을 입력하세요"
               value={customAllergen}
               onChangeText={setCustomAllergen}
+              returnKeyType="done"
+              onSubmitEditing={addCustomAllergen}
             />
             <Button variant="outline" size="sm" onPress={addCustomAllergen}>
               추가
             </Button>
           </View>
-        </View>
 
-        <View style={styles.selectedTags}>
-          {selectedAllergens.map((allergen, idx) => (
-            <TouchableOpacity key={idx} style={styles.tag} onPress={() => toggleAllergen(allergen)}>
-              <Text style={styles.tagText}>{allergen}</Text>
-              <AppIcon name="close" size={16} color={COLORS.danger} />
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {allergenSearch.length > 0 && (
-          <View style={styles.allergenList}>
-            {filteredAllergens.slice(0, 10).map((allergen, idx) => (
-              <TouchableOpacity
-                key={idx}
-                style={styles.allergenItem}
-                onPress={() => toggleAllergen(allergen)}
-              >
-                <Text
-                  style={[
-                    styles.allergenItemText,
-                    selectedAllergens.includes(allergen) && styles.allergenItemTextSelected,
-                  ]}
-                >
-                  {allergen} {selectedAllergens.includes(allergen) && '(선택됨)'}
-                </Text>
-              </TouchableOpacity>
-            ))}
+          <View style={styles.selectedTagsWrap}>
+            <Text style={styles.selectedTagsLabel}>추가된 성분 {selectedAllergens.length}개</Text>
+            {selectedAllergens.length === 0 ? (
+              <Text style={styles.selectedTagsEmpty}>아직 추가된 성분이 없어요.</Text>
+            ) : (
+              <View style={styles.selectedTags}>
+                {selectedAllergens.map((allergen, idx) => (
+                  <TouchableOpacity key={idx} style={styles.tag} onPress={() => toggleAllergen(allergen)}>
+                    <Text style={styles.tagText}>{allergen}</Text>
+                    <AppIcon name="close" size={16} color={COLORS.danger} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+            <Text style={styles.selectedTagsHint}>태그를 누르면 제거됩니다.</Text>
           </View>
-        )}
+        </View>
+
+        <View style={styles.footerSpacer} />
       </View>
     );
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
-        {renderProgressBar()}
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
+      <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} translucent={false} hidden={false} />
 
-        {step === 1 && renderStep1()}
-        {step === 2 && renderStep2()}
-        {step === 3 && renderStep3()}
-        {step === 4 && renderStep4()}
-      </ScrollView>
+      <KeyboardAvoidingView
+        style={styles.keyboardAvoidingContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <View style={styles.mainContent}>
+            <ScrollView
+              style={styles.content}
+              contentContainerStyle={styles.scrollContent}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+              showsVerticalScrollIndicator={false}
+            >
+              {renderProgressBar()}
 
-      <View style={styles.footer}>
-        {step > 1 && (
-          <Button variant="outline" onPress={handleBack} style={styles.backButton}>
-            이전
-          </Button>
-        )}
-        <Button
-          style={styles.nextButton}
-          disabled={(step === 1 && !bodyGoal) || (step === 2 && !healthDiet) || (step === 3 && !lifestyleDiet)}
-          onPress={handleNext}
-        >
-          {step === 4 ? '완료' : '다음'}
-        </Button>
-      </View>
+              {step === 1 && renderStep1()}
+              {step === 2 && renderStep2()}
+              {step === 3 && renderStep3()}
+              {step === 4 && renderStep4()}
+            </ScrollView>
+
+            <View style={[styles.footer, keyboardInset > 0 && { marginBottom: Math.min(28, keyboardInset) }]}>
+              {step > 1 && (
+                <Button variant="outline" onPress={handleBack} style={styles.backButton}>
+                  이전
+                </Button>
+              )}
+              <Button
+                style={styles.nextButton}
+                disabled={(step === 1 && !bodyGoal) || (step === 2 && !healthDiet) || (step === 3 && !lifestyleDiet)}
+                onPress={handleNext}
+              >
+                {step === 4 ? '완료' : '다음'}
+              </Button>
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
+  keyboardAvoidingContainer: { flex: 1 },
+  mainContent: { flex: 1 },
   content: { flex: 1 },
-  scrollContent: { padding: SPACING.lg, paddingBottom: 100 },
+  scrollContent: { padding: SPACING.lg, paddingBottom: SPACING.xl },
 
   // Progress Bar
   progressContainer: { marginBottom: SPACING.xl },
@@ -532,18 +593,32 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     borderRadius: RADIUS.md,
     padding: SPACING.md,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.backgroundGray,
     marginBottom: SPACING.md,
   },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sectionTitleIconWrap: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.blue50,
+  },
   sectionTitle: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '800',
     color: COLORS.text,
   },
   sectionDesc: {
-    marginTop: 4,
-    fontSize: 12,
+    marginTop: 6,
+    fontSize: 13,
     color: COLORS.textGray,
+    lineHeight: 18,
   },
   fieldRow: {
     marginTop: SPACING.md,
@@ -625,71 +700,68 @@ const styles = StyleSheet.create({
   optionDesc: { fontSize: 14, color: COLORS.textGray },
 
   // Step 4
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: RADIUS.sm,
-    paddingHorizontal: SPACING.md,
-    marginBottom: SPACING.md,
-    height: 48,
-  },
-  searchIcon: { marginRight: SPACING.sm },
-  searchInput: { flex: 1, fontSize: 16, color: COLORS.text },
-
   customInputContainer: {
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    paddingTop: SPACING.md,
-    marginBottom: SPACING.md,
+    marginTop: SPACING.md,
+    marginBottom: SPACING.sm,
   },
-  customInputLabel: { fontSize: 16, fontWeight: '500', color: COLORS.text, marginBottom: SPACING.sm },
-  customInputRow: { flexDirection: 'row', gap: SPACING.sm },
+  customInputLabel: { fontSize: 16, fontWeight: '700', color: COLORS.text, marginBottom: 4 },
+  customInputHint: { fontSize: 12, color: COLORS.textGray, marginBottom: SPACING.sm },
+  customInputRow: { flexDirection: 'row', gap: SPACING.sm, alignItems: 'center' },
   customInput: {
     flex: 1,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: COLORS.blue200,
     borderRadius: RADIUS.sm,
     paddingHorizontal: SPACING.md,
-    height: 40,
+    height: 44,
+    color: COLORS.text,
+    backgroundColor: COLORS.background,
+    fontSize: 14,
   },
 
-  selectedTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: SPACING.md },
+  selectedTagsWrap: {
+    marginTop: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.blue200,
+    borderRadius: RADIUS.md,
+    padding: SPACING.md,
+    backgroundColor: COLORS.blue50,
+  },
+  selectedTagsLabel: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  selectedTagsEmpty: {
+    marginTop: 8,
+    fontSize: 13,
+    color: COLORS.textGray,
+  },
+  selectedTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  selectedTagsHint: {
+    marginTop: 10,
+    fontSize: 12,
+    color: COLORS.textGray,
+  },
   tag: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.red50,
+    backgroundColor: COLORS.background,
     paddingVertical: 8,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     borderRadius: RADIUS.full,
     borderWidth: 1,
-    borderColor: COLORS.red200,
+    borderColor: COLORS.blue200,
     gap: 8,
   },
-  tagText: { color: COLORS.danger, fontWeight: '600' },
-
-  allergenList: {
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: RADIUS.sm,
-    maxHeight: 200,
-  },
-  allergenItem: {
-    padding: SPACING.md,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  allergenItemText: { fontSize: 16, color: COLORS.text },
-  allergenItemTextSelected: { color: COLORS.textGray, textDecorationLine: 'line-through' },
+  tagText: { color: COLORS.text, fontWeight: '700', fontSize: 12 },
+  footerSpacer: { height: 8 },
 
   // Footer
   footer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: SPACING.lg,
+    paddingHorizontal: SPACING.lg,
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.lg,
     backgroundColor: COLORS.background,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,

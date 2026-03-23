@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import NetInfo from '@react-native-community/netinfo';
 import { RootStackParamList } from './types';
 import { isSupabaseConfigured, supabase } from '../services/supabaseClient';
-import { fetchMyAppUser } from '../services/userData';
+import { ensureMyAppUserRemote, fetchMyAppUser } from '../services/userData';
 import { retryAsync } from '../services/retry';
 import { useUserStore } from '../store/userStore';
 import { useAppAlert } from '../components/ui/AppAlert';
@@ -41,6 +42,7 @@ import ChatScreen from '../screens/main/ChatScreen';
 import BodyTrackerScreen from '../screens/main/BodyTrackerScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+const PUBLIC_ROUTES: Array<keyof RootStackParamList> = ['Login', 'Signup'];
 
 function withTimeout<T>(p: Promise<T>, ms: number) {
   return new Promise<T>((resolve, reject) => {
@@ -78,6 +80,7 @@ export default function RootNavigator() {
   const [navReady, setNavReady] = useState(false);
   const [sessionExpiredNoticeShown, setSessionExpiredNoticeShown] = useState(false);
   const [networkNoticeShown, setNetworkNoticeShown] = useState(false);
+  const sessionGuardRunningRef = useRef(false);
 
   const resetTo = (name: keyof RootStackParamList, params?: any) => {
     if (navigationRef.isReady()) {
@@ -86,6 +89,46 @@ export default function RootNavigator() {
     }
     setPendingReset({ name, params });
   };
+
+  const notifySessionExpiredAndGoLogin = useCallback(() => {
+    if (sessionExpiredNoticeShown) {
+      resetTo('Login');
+      return;
+    }
+
+    setSessionExpiredNoticeShown(true);
+    resetTo('Login');
+    alert({
+      title: '세션 만료',
+      message: '세션이 만료되었거나 로그아웃 상태입니다. 다시 로그인해주세요.',
+    });
+  }, [alert, sessionExpiredNoticeShown]);
+
+  const guardProtectedRouteSession = useCallback(async () => {
+    if (!navigationRef.isReady()) return;
+    if (sessionGuardRunningRef.current) return;
+
+    const currentRoute = navigationRef.getCurrentRoute()?.name as keyof RootStackParamList | undefined;
+    if (!currentRoute) return;
+    if (PUBLIC_ROUTES.includes(currentRoute)) return;
+
+    if (!isSupabaseConfigured || !supabase) {
+      resetTo('Login');
+      return;
+    }
+
+    sessionGuardRunningRef.current = true;
+    try {
+      const { data, error } = await supabase.auth.getSession();
+      if (error || !data?.session) {
+        notifySessionExpiredAndGoLogin();
+      }
+    } catch {
+      // ignore network/transient errors in route guard
+    } finally {
+      sessionGuardRunningRef.current = false;
+    }
+  }, [navigationRef, notifySessionExpiredAndGoLogin]);
 
   useEffect(() => {
     let mounted = true;
@@ -108,19 +151,28 @@ export default function RootNavigator() {
       }
     };
 
-    const notifySessionExpiredAndGoLogin = () => {
-      if (!mounted) return;
-      if (sessionExpiredNoticeShown) {
-        resetTo('Login');
-        return;
-      }
+    const loadProfileWithProvision = async () => {
+      try {
+        return await retryAsync(
+          () => withTimeout(fetchMyAppUser(), 1500),
+          { retries: 1, delayMs: 700 }
+        );
+      } catch (e: any) {
+        const code = String(e?.code || '').toLowerCase();
+        const msg = String(e?.message || '').toLowerCase();
+        const maybeMissingProfile =
+          code === 'pgrst116' ||
+          msg.includes('no rows') ||
+          msg.includes('json object requested, multiple (or no) rows returned');
 
-      setSessionExpiredNoticeShown(true);
-      resetTo('Login');
-      alert({
-        title: '세션 만료',
-        message: '장시간 로그인 하지 않아 로그아웃되었습니다. 다시 로그인해주세요.',
-      });
+        if (!maybeMissingProfile) throw e;
+
+        await ensureMyAppUserRemote();
+        return await retryAsync(
+          () => withTimeout(fetchMyAppUser(), 1500),
+          { retries: 1, delayMs: 700 }
+        );
+      }
     };
 
     (async () => {
@@ -175,10 +227,7 @@ export default function RootNavigator() {
 
         // 세션이 있으면 프로필도 미리 로드
         try {
-          const remoteProfile = await retryAsync(
-            () => withTimeout(fetchMyAppUser(), 1500),
-            { retries: 1, delayMs: 700 }
-          );
+          const remoteProfile = await loadProfileWithProvision();
           await setProfile(remoteProfile as any);
           if (mounted) {
             if (remoteProfile?.onboardingCompleted) {
@@ -231,10 +280,7 @@ export default function RootNavigator() {
       }
 
       try {
-        const remoteProfile = await retryAsync(
-          () => withTimeout(fetchMyAppUser(), 1500),
-          { retries: 1, delayMs: 700 }
-        );
+        const remoteProfile = await loadProfileWithProvision();
         await setProfile(remoteProfile as any);
         if (remoteProfile?.onboardingCompleted) {
           resetTo('MainTab', { screen: 'Scan' });
@@ -250,23 +296,45 @@ export default function RootNavigator() {
       mounted = false;
       sub?.data?.subscription?.unsubscribe?.();
     };
-  }, [alert, clearAllData, networkNoticeShown, sessionExpiredNoticeShown, setProfile]);
+  }, [alert, clearAllData, networkNoticeShown, notifySessionExpiredAndGoLogin, setProfile]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void guardProtectedRouteSession();
+      }
+    });
+
+    return () => {
+      sub.remove();
+    };
+  }, [guardProtectedRouteSession]);
 
   return (
     <>
       <NavigationContainer
         ref={navigationRef}
+        onStateChange={() => {
+          void guardProtectedRouteSession();
+        }}
         onReady={() => {
           setNavReady(true);
           if (pendingReset) {
             navigationRef.resetRoot({ index: 0, routes: [{ name: pendingReset.name as any, params: pendingReset.params }] });
             setPendingReset(null);
           }
+          void guardProtectedRouteSession();
         }}
       >
         <Stack.Navigator 
           initialRouteName="Login"
-          screenOptions={{ headerShown: false }}
+          screenOptions={{
+            headerShown: false,
+            animation: 'slide_from_right',
+            animationTypeForReplace: 'push',
+            gestureEnabled: true,
+            freezeOnBlur: true,
+          }}
         >
           <Stack.Screen name="Login" component={LoginScreen} />
           <Stack.Screen name="Signup" component={SignupScreen} />

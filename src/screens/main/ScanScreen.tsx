@@ -61,6 +61,70 @@ export default function ScanScreen() {
   const [showTutorial, setShowTutorial] = useState(false);
   const [sessionUserId, setSessionUserId] = useState<string | null>(null);
 
+  const requestCameraPermissionWithAppAlert = useCallback(async () => {
+    return ensureCameraPermissionWithPrompt({
+      confirmRequest: () =>
+        new Promise<boolean>((resolve) => {
+          alert({
+            title: '카메라 권한 필요',
+            message: '사진을 찍으려면 카메라 권한 허용이 필요해요. 지금 허용할까요?',
+            actions: [
+              { text: '나중에', variant: 'outline', onPress: () => resolve(false) },
+              { text: '권한 허용', variant: 'primary', onPress: () => resolve(true) },
+            ],
+          });
+        }),
+      onNeverAskAgain: ({ title, message, openSettings }) => {
+        alert({
+          title,
+          message,
+          actions: [
+            { text: '닫기', variant: 'outline' },
+            {
+              text: '설정 열기',
+              variant: 'primary',
+              onPress: () => {
+                void openSettings();
+              },
+            },
+          ],
+        });
+      },
+    });
+  }, [alert]);
+
+  const requestPhotoPermissionWithAppAlert = useCallback(async () => {
+    return ensurePhotoLibraryPermissionWithPrompt({
+      confirmRequest: () =>
+        new Promise<boolean>((resolve) => {
+          alert({
+            title: '사진 접근 권한 필요',
+            message: '라이브러리에서 사진을 선택하려면 사진 접근 권한 허용이 필요해요. 지금 허용할까요?',
+            actions: [
+              { text: '나중에', variant: 'outline', onPress: () => resolve(false) },
+              { text: '권한 허용', variant: 'primary', onPress: () => resolve(true) },
+            ],
+          });
+        }),
+      onNeverAskAgain: ({ title, message, openSettings }) => {
+        alert({
+          title,
+          message,
+          actions: [
+            { text: '닫기', variant: 'outline' },
+            {
+              text: '설정 열기',
+              variant: 'primary',
+              onPress: () => {
+                void openSettings();
+              },
+            },
+          ],
+        });
+      },
+    });
+  }, [alert]);
+
   const ensureScanQuotaOrAlert = async () => {
     const userId = await getSessionUserId().catch(() => null);
     if (!userId) {
@@ -191,8 +255,8 @@ export default function ScanScreen() {
     const ok = await ensureScanQuotaOrAlert();
     if (!ok) return false;
 
-    return ensureCameraPermissionWithPrompt();
-  }, [isOnline]);
+    return requestCameraPermissionWithAppAlert();
+  }, [isOnline, requestCameraPermissionWithAppAlert]);
 
   const goToVerifyTutorialPhase = async () => {
     // Hide scan overlay but continue tutorial on Verify screen.
@@ -254,7 +318,7 @@ export default function ScanScreen() {
     const ok = await ensureScanQuotaOrAlert();
     if (!ok) return;
 
-    const hasPhotoPermission = await ensurePhotoLibraryPermissionWithPrompt();
+    const hasPhotoPermission = await requestPhotoPermissionWithAppAlert();
     if (!hasPhotoPermission) return;
 
     try {
@@ -268,7 +332,7 @@ export default function ScanScreen() {
       console.error('Gallery Error:', error);
       alert({ title: '오류', message: error?.message || '갤러리를 여는 중 문제가 발생했습니다.' });
     }
-  }, [alert, navigation]);
+  }, [alert, navigation, requestPhotoPermissionWithAppAlert]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.backgroundGray }]} edges={['top', 'left', 'right']}>

@@ -6,7 +6,8 @@ serve((req: Request) => {
     return new Response(JSON.stringify({ ok: false, message: 'GET only' }), { status: 405, headers: { 'Content-Type': 'application/json' } });
   }
   const envGemini = Boolean((globalThis as any).Deno?.env?.get?.('GEMINI_API_KEY'));
-  const model = (globalThis as any).Deno?.env?.get?.('GEMINI_MODEL') || 'gemini-2.5-flash-lite';
+  const geminiBaseUrl = 'https://generativelanguage.googleapis.com/v1beta/openai';
+  const model = (globalThis as any).Deno?.env?.get?.('GEMINI_MODEL') || 'gemini-3.1-flash-lite';
   const visionModel = (globalThis as any).Deno?.env?.get?.('GEMINI_IMAGE_MODEL') || model;
   const textModel = (globalThis as any).Deno?.env?.get?.('GEMINI_TEXT_MODEL') || model;
   const data = {
@@ -15,6 +16,7 @@ serve((req: Request) => {
     version: 'v2',
     time: new Date().toISOString(),
     envGemini,
+    geminiBaseUrl,
     model,
     visionModel,
     textModel,

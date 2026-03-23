@@ -1,0 +1,16 @@
+앞으로 실행 전 추천 순서
+
+에뮬레이터 기동 확인
+adb devices
+기존 앱 제거 (서명 충돌 예방)
+adb uninstall com.front
+용량 정리 (선택이지만 추천)
+adb shell pm trim-caches 1G
+Metro 캐시 초기화 실행 (새 터미널)
+npx react-native start --reset-cache
+앱 설치/실행 (다른 터미널)
+npx react-native run-android
+빠른 복구용 최소 명령(같은 오류 재발 시)
+
+adb uninstall com.front
+npx react-native run-andr

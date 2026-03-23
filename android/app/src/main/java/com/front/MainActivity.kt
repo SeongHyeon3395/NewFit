@@ -10,43 +10,38 @@ import com.facebook.react.defaults.DefaultReactActivityDelegate
 
 class MainActivity : ReactActivity() {
 
-  private fun applyHighRefreshRatePreference() {
+  private fun clearRefreshRatePreference() {
     try {
+      val attrs = window.attributes
+
+      // Let Android fully follow user/device display settings (30/60/90/120Hz, battery saver, adaptive mode).
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-        val disp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display else windowManager.defaultDisplay
-        val modes = disp?.supportedModes
-        if (modes != null && modes.isNotEmpty()) {
-          val bestMode = modes.maxByOrNull { it.refreshRate }
-          if (bestMode != null) {
-            val attrs = window.attributes
-            attrs.preferredDisplayModeId = bestMode.modeId
-            window.attributes = attrs
+        attrs.preferredDisplayModeId = 0
+      }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+        attrs.preferredRefreshRate = 0f
+      }
+      window.attributes = attrs
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-              // Android 11+(API 30) has Window#setFrameRate, but we avoid compile-time dependency
-              // to keep builds working across toolchain/SDK variations.
-              try {
-                val windowClass = window.javaClass
-                val setFrameRate = windowClass.getMethod(
-                  "setFrameRate",
-                  Float::class.javaPrimitiveType,
-                  Int::class.javaPrimitiveType
-                )
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        try {
+          val windowClass = window.javaClass
+          val setFrameRate = windowClass.getMethod(
+            "setFrameRate",
+            Float::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType
+          )
 
-                // Window.FRAME_RATE_COMPATIBILITY_DEFAULT (int) via reflection
-                val compatDefault = try {
-                  val field = Class.forName("android.view.Window").getField("FRAME_RATE_COMPATIBILITY_DEFAULT")
-                  field.getInt(null)
-                } catch (_: Throwable) {
-                  0
-                }
-
-                setFrameRate.invoke(window, bestMode.refreshRate, compatDefault)
-              } catch (_: Throwable) {
-                // ignore
-              }
-            }
+          val compatDefault = try {
+            val field = Class.forName("android.view.Window").getField("FRAME_RATE_COMPATIBILITY_DEFAULT")
+            field.getInt(null)
+          } catch (_: Throwable) {
+            0
           }
+
+          setFrameRate.invoke(window, 0f, compatDefault)
+        } catch (_: Throwable) {
+          // ignore
         }
       }
     } catch (_: Throwable) {
@@ -57,12 +52,19 @@ class MainActivity : ReactActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     installSplashScreen()
     super.onCreate(savedInstanceState)
-    applyHighRefreshRatePreference()
+    clearRefreshRatePreference()
   }
 
   override fun onResume() {
     super.onResume()
-    applyHighRefreshRatePreference()
+    clearRefreshRatePreference()
+  }
+
+  override fun onWindowFocusChanged(hasFocus: Boolean) {
+    super.onWindowFocusChanged(hasFocus)
+    if (hasFocus) {
+      clearRefreshRatePreference()
+    }
   }
 
   /**

@@ -6,6 +6,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+const GEMINI_OPENAI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai';
+
 function json(resBody: any, status = 200) {
   return new Response(JSON.stringify(resBody), {
     status,
@@ -153,22 +155,24 @@ function buildStubPlan(params: { days: number; mode: string; avoidFoods?: string
 }
 
 async function callGeminiText(prompt: string): Promise<string> {
-  const apiKey = Deno.env.get('GEMINI_API_KEY') ?? Deno.env.get('GOOGLE_API_KEY') ?? '';
+  const apiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
   if (!apiKey) throw new Error('MISSING_GEMINI_API_KEY');
 
-  const model = Deno.env.get('GEMINI_TEXT_MODEL') ?? Deno.env.get('GEMINI_MODEL') ?? 'gemini-2.5-flash-lite';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const model = Deno.env.get('GEMINI_TEXT_MODEL') ?? Deno.env.get('GEMINI_MODEL') ?? 'gemini-3.1-flash-lite';
+  const url = `${GEMINI_OPENAI_BASE_URL}/chat/completions`;
 
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
     body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.7,
-        topP: 0.9,
-        maxOutputTokens: 2048,
-      },
+      model,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.7,
+      top_p: 0.9,
+      max_tokens: 2048,
     }),
   });
 
@@ -178,7 +182,7 @@ async function callGeminiText(prompt: string): Promise<string> {
     throw new Error(msg);
   }
 
-  const text = json?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text).filter(Boolean).join('') ?? '';
+  const text = String(json?.choices?.[0]?.message?.content || '');
   return String(text || '');
 }
 
@@ -198,7 +202,7 @@ serve(async (req) => {
     const nonce = String(body?.nonce || '');
 
     // If no key, return stub (keeps mobile dev unblocked).
-    const apiKey = Deno.env.get('GEMINI_API_KEY') ?? Deno.env.get('GOOGLE_API_KEY') ?? '';
+    const apiKey = Deno.env.get('GEMINI_API_KEY') ?? '';
     if (!apiKey) {
       return json(buildStubPlan({ days, mode, avoidFoods, nonce }));
     }

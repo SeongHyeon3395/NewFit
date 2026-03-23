@@ -59,6 +59,26 @@ react {
  */
 def enableProguardInReleaseBuilds = false
 
+def readDotEnvValue = { String key ->
+    def envFile = rootProject.file('../.env')
+    if (!envFile.exists()) return ''
+
+    for (String rawLine : envFile.readLines('UTF-8')) {
+        def line = rawLine?.trim()
+        if (!line || line.startsWith('#')) continue
+        if (!line.startsWith("${key}=")) continue
+
+        def value = line.substring(key.length() + 1).trim()
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+            value = value.substring(1, value.length() - 1)
+        }
+        return value
+    }
+    return ''
+}
+
+def kakaoNativeAppKey = project.findProperty('KAKAO_NATIVE_APP_KEY') ?: System.getenv('KAKAO_NATIVE_APP_KEY') ?: readDotEnvValue('KAKAO_NATIVE_APP_KEY')
+
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
  *
@@ -84,10 +104,13 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        manifestPlaceholders = [KAKAO_NATIVE_APP_KEY: kakaoNativeAppKey]
+        resValue "string", "kakao_app_key", kakaoNativeAppKey
     }
     signingConfigs {
         debug {
-            storeFile file('debug.keystore')
+            // Use the standard Android debug keystore in user home to avoid SHA-1 mismatch.
+            storeFile file("${System.properties['user.home']}/.android/debug.keystore")
             storePassword 'android'
             keyAlias 'androiddebugkey'
             keyPassword 'android'

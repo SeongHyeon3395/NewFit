@@ -3,6 +3,8 @@ import {
   SUPABASE_ANON_KEY as ENV_SUPABASE_ANON_KEY,
   SUPABASE_URL as ENV_SUPABASE_URL,
   PRIVACY_POLICY_URL as ENV_PRIVACY_POLICY_URL,
+  GOOGLE_WEB_CLIENT_ID as ENV_GOOGLE_WEB_CLIENT_ID,
+  KAKAO_NATIVE_APP_KEY as ENV_KAKAO_NATIVE_APP_KEY,
 } from '@env';
 // Debug 로그: 개발 중 BASE_URL 로딩 문제 추적용
 if (__DEV__) {
@@ -77,6 +79,11 @@ export const ENDPOINTS = {
 // Supabase client headers
 // Use anon key for public functions or user access token for authenticated calls.
 export const SUPABASE_ANON_KEY = ENV_SUPABASE_ANON_KEY || '';
+
+export const GOOGLE_WEB_CLIENT_ID = (
+  ENV_GOOGLE_WEB_CLIENT_ID || '1002963880366-s3h0vqf32kt3q1tbrit9thhn4encbecr.apps.googleusercontent.com'
+).trim();
+export const KAKAO_NATIVE_APP_KEY = (ENV_KAKAO_NATIVE_APP_KEY || '').trim();
 
 // External link (required by store policies). If empty, UI will prompt you to set it.
 export const PRIVACY_POLICY_URL = (ENV_PRIVACY_POLICY_URL || '').trim();

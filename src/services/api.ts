@@ -121,7 +121,17 @@ async function uploadImage(endpoint: string, fileUri: string, extraFields?: Reco
 
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const message = (json && (json.message || json.error)) || `HTTP ${res.status}`;
+    const baseMessage = (json && (json.message || json.error)) || `HTTP ${res.status}`;
+    const detailParts = [
+      typeof (json as any)?.code === 'number' ? `code: ${(json as any).code}` : `status: ${res.status}`,
+      typeof (json as any)?.model === 'string' ? `vision: ${(json as any).model}` : null,
+      typeof (json as any)?.textModel === 'string' ? `text: ${(json as any).textModel}` : null,
+      typeof (json as any)?.retryAfterSeconds === 'number' ? `retryAfter: ${(json as any).retryAfterSeconds}s` : null,
+    ].filter(Boolean);
+
+    const message = detailParts.length > 0
+      ? `${baseMessage}\n(${detailParts.join(', ')})`
+      : baseMessage;
     throw new Error(message);
   }
   return json as AnalyzeResponse;

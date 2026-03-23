@@ -121,7 +121,7 @@ function mapAppUserRowToProfile(row: AppUserRow, email: string): UserProfile {
     themeMode:
       (row as any).theme_mode === 'light' || (row as any).theme_mode === 'dark' || (row as any).theme_mode === 'system'
         ? ((row as any).theme_mode as any)
-        : 'system',
+        : 'light',
 
     onboardingCompleted: Boolean(row.onboarding_completed),
     createdAt: row.created_at,
@@ -744,6 +744,13 @@ export async function fetchMyAppUser() {
   return mapAppUserRowToProfile(data as AppUserRow, email);
 }
 
+export async function ensureMyAppUserRemote() {
+  const client = requireSupabase();
+  const { data, error } = await client.functions.invoke('ensure-app-user', { method: 'POST' });
+  if (error) throw error;
+  return data as any;
+}
+
 export async function updateMyAppUser(updates: Partial<UserProfile>) {
   const userId = await getSessionUserId();
   if (!userId) throw new Error('로그인이 필요합니다.');
@@ -968,6 +975,11 @@ export async function listFoodLogsRemote(limit = 50) {
       if (isLocalDeviceUri(imageUri)) {
         const repairedUrl = await tryRepairFoodLogImage(row);
         logs[idx].imageUri = repairedUrl || imageUri;
+      }
+
+      const finalUri = String(logs[idx]?.imageUri ?? '').trim();
+      if (finalUri && !isRemoteHttpUrl(finalUri) && !isLocalDeviceUri(finalUri)) {
+        logs[idx].imageUri = '';
       }
     })
   );
@@ -1223,6 +1235,11 @@ export async function listManualMealLogsRemote(limit = 500) {
         }
 
         logs[idx].imageUri = imageUri;
+      }
+
+      const finalUri = String(logs[idx]?.imageUri ?? '').trim();
+      if (finalUri && !isRemoteHttpUrl(finalUri) && !isLocalDeviceUri(finalUri)) {
+        logs[idx].imageUri = '';
       }
     })
   );

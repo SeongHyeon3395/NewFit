@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, InteractionManager, StyleSheet, useColorScheme, View } from 'react-native';
+import { Animated, Easing, StyleSheet, useColorScheme, View } from 'react-native';
 import { useUserStore } from '../store/userStore';
 import { updateMyAppUser } from '../services/userData';
+import { runWhenIdle } from '../services/idleTask';
 
 import { darkColors, lightColors, type ThemeColors } from './tokens';
 import type { AppThemeMode } from '../types/user';
@@ -20,7 +21,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const systemScheme = useColorScheme();
-  const [mode, setModeState] = useState<ThemeMode>('system');
+  const [mode, setModeState] = useState<ThemeMode>('light');
   const profileThemeMode = useUserStore(state => state.profile?.themeMode);
   const setProfile = useUserStore(state => state.setProfile);
   const resolvedMode = mode === 'system' ? (systemScheme === 'dark' ? 'dark' : 'light') : mode;
@@ -44,7 +45,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setModeState(nextMode);
 
     if (profileThemeMode !== nextMode) {
-      InteractionManager.runAfterInteractions(() => {
+      runWhenIdle(() => {
         void (async () => {
           try {
             const remoteProfile = await updateMyAppUser({ themeMode: nextMode });
@@ -53,7 +54,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
             // ignore
           }
         })();
-      });
+      }, 150);
     }
   };
 

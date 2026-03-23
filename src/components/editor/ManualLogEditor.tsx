@@ -8,6 +8,7 @@ import { pickPhotoFromCamera } from '../../services/imagePicker';
 import { ensureCameraPermissionWithPrompt } from '../../services/permissions';
 import type { ManualMealLog } from '../../types/user';
 import { useTheme } from '../../theme/ThemeProvider';
+import { useAppAlert } from '../ui/AppAlert';
 
 type MealType = ManualMealLog['mealType'];
 
@@ -39,6 +40,7 @@ export function ManualLogEditor(props: {
   onClose?: () => void;
 }) {
   const { colors } = useTheme();
+  const { alert } = useAppAlert();
   const submitLabel = props.submitLabel ?? '저장';
   const closeLabel = props.closeLabel ?? '닫기';
 
@@ -54,7 +56,29 @@ export function ManualLogEditor(props: {
   const canClose = typeof props.onClose === 'function';
 
   const capturePhoto = useCallback(async () => {
-    const hasCameraPermission = await ensureCameraPermissionWithPrompt();
+    const hasCameraPermission = await ensureCameraPermissionWithPrompt({
+      confirmRequest: () =>
+        new Promise<boolean>((resolve) => {
+          alert({
+            title: '카메라 권한 필요',
+            message: '사진을 촬영하려면 카메라 권한이 필요해요. 지금 허용할까요?',
+            actions: [
+              { text: '나중에', variant: 'outline', onPress: () => resolve(false) },
+              { text: '권한 허용', variant: 'primary', onPress: () => resolve(true) },
+            ],
+          });
+        }),
+      onNeverAskAgain: ({ title, message, openSettings }) => {
+        alert({
+          title,
+          message,
+          actions: [
+            { text: '닫기', variant: 'outline' },
+            { text: '설정 열기', variant: 'primary', onPress: () => void openSettings() },
+          ],
+        });
+      },
+    });
     if (!hasCameraPermission) return;
 
     const picked = await pickPhotoFromCamera({ quality: 0.88, includeBase64: true });
@@ -62,7 +86,7 @@ export function ManualLogEditor(props: {
     if (!uri) return;
     setPhotoUri(uri);
     setPhotoBase64(String(picked?.base64 ?? ''));
-  }, []);
+  }, [alert]);
 
   const submitUpdates = useMemo<Partial<ManualMealLog>>(
     () => ({

@@ -116,7 +116,7 @@ export default function VerifyScreen() {
   const { alert } = useAppAlert();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const { colors, isDark } = useTheme();
-  const loadingChars = useMemo(() => ['분', '석', '중', '.', '.', '.'], []);
+  const loadingChars = useMemo(() => ['이', '미', '지', ' ', '분', '석', '중', '.', '.', '.'], []);
   const waveValuesRef = useRef(loadingChars.map(() => new Animated.Value(0)));
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const emojiFloat = useRef(new Animated.Value(0)).current;
@@ -556,9 +556,9 @@ export default function VerifyScreen() {
         ]}
       >
         <View style={[styles.analyzingCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <Animated.Text
+          <Animated.View
             style={[
-              styles.analyzingEmoji,
+              styles.analyzingGeminiWrap,
               {
                 transform: [
                   {
@@ -570,16 +570,16 @@ export default function VerifyScreen() {
                   {
                     scale: emojiFloat.interpolate({
                       inputRange: [0, 1],
-                      outputRange: [1, 1.05],
+                      outputRange: [1, 1.06],
                     }),
                   },
                 ],
               },
             ]}
           >
-            🤖
-          </Animated.Text>
-          <Text style={[styles.analyzingTitle, { color: colors.text }]}>AI가 열심히 보고 있어요</Text>
+            <AppIcon name="auto-awesome" size={32} color={colors.primaryDark} />
+          </Animated.View>
+          <Text style={[styles.analyzingTitle, { color: colors.text }]}>Gemini가 이미지를 분석하고 있습니다</Text>
           <View style={styles.waveRow}>
             {loadingChars.map((char, idx) => {
               const animatedValue = waveValuesRef.current[idx];
@@ -833,9 +833,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     paddingVertical: 24,
   },
-  analyzingEmoji: {
-    fontSize: 40,
-    marginBottom: 8,
+  analyzingGeminiWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+    backgroundColor: COLORS.blue50,
   },
   analyzingTitle: {
     fontSize: 16,

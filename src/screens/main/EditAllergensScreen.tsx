@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useState } from 'react';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 
@@ -9,7 +9,6 @@ import { AppIcon } from '../../components/ui/AppIcon';
 import { Button } from '../../components/ui/Button';
 import { useAppAlert } from '../../components/ui/AppAlert';
 import { useUserStore } from '../../store/userStore';
-import { ALL_ALLERGENS } from '../../constants';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export default function EditAllergensScreen() {
@@ -23,15 +22,8 @@ export default function EditAllergensScreen() {
   const [selectedAllergens, setSelectedAllergens] = useState<string[]>(
     Array.isArray(profile?.allergens) ? profile!.allergens : []
   );
-  const [allergenSearch, setAllergenSearch] = useState('');
   const [customAllergen, setCustomAllergen] = useState('');
   const [saving, setSaving] = useState(false);
-
-  const filteredAllergens = useMemo(() => {
-    const q = allergenSearch.trim();
-    if (!q) return [];
-    return ALL_ALLERGENS.filter(a => a.includes(q));
-  }, [allergenSearch]);
 
   const toggleAllergen = (allergen: string) => {
     setSelectedAllergens(prev => {
@@ -43,7 +35,11 @@ export default function EditAllergensScreen() {
   const addCustomAllergen = () => {
     const next = customAllergen.trim();
     if (!next) return;
-    setSelectedAllergens(prev => (prev.includes(next) ? prev : [...prev, next]));
+    const normalized = next.toLowerCase();
+    setSelectedAllergens(prev => {
+      const exists = prev.some(a => a.trim().toLowerCase() === normalized);
+      return exists ? prev : [...prev, next];
+    });
     setCustomAllergen('');
   };
 
@@ -72,75 +68,60 @@ export default function EditAllergensScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Card style={styles.card}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>검색해서 추가</Text>
-
-          <View style={[styles.searchContainer, { borderColor: colors.border, backgroundColor: colors.background }]}>
-            <View style={styles.searchIcon}>
-              <AppIcon name="search" size={20} color={colors.textGray} />
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <Card style={styles.card}>
+            <View style={styles.titleRow}>
+              <View style={[styles.titleIconWrap, { backgroundColor: colors.blue50 }]}>
+                <AppIcon name="bolt" size={15} color={colors.primary} />
+              </View>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>직접 추가</Text>
             </View>
-            <TextInput
-              style={[styles.searchInput, { color: colors.text }]}
-              placeholder="알레르기 성분 검색... (예: 땅콩, 우유)"
-              placeholderTextColor={colors.textGray}
-              value={allergenSearch}
-              onChangeText={setAllergenSearch}
-            />
-          </View>
-
-          {!!filteredAllergens.length && (
-            <View style={[styles.suggestions, { borderColor: colors.border }] }>
-              {filteredAllergens.slice(0, 20).map(a => (
-                <TouchableOpacity key={a} style={[styles.suggestionItem, { borderTopColor: colors.border, backgroundColor: colors.background }]} onPress={() => toggleAllergen(a)}>
-                  <Text style={[styles.suggestionText, { color: colors.text }]}>{a}</Text>
-                  <AppIcon
-                    name={selectedAllergens.includes(a) ? 'check-circle' : 'plus-circle'}
-                    size={18}
-                    color={selectedAllergens.includes(a) ? colors.primary : colors.textGray}
-                  />
-                </TouchableOpacity>
-              ))}
+            <Text style={[styles.sectionDesc, { color: colors.textSecondary }]}>원하는 알레르기 성분을 직접 입력해서 추가하세요.</Text>
+            <View style={styles.customInputRow}>
+              <TextInput
+                style={[styles.customInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.background }]}
+                placeholder="예: 땅콩, 우유, 고수"
+                placeholderTextColor={colors.textGray}
+                value={customAllergen}
+                onChangeText={setCustomAllergen}
+                returnKeyType="done"
+                onSubmitEditing={addCustomAllergen}
+              />
+              <Button variant="outline" size="sm" onPress={addCustomAllergen}>
+                추가
+              </Button>
             </View>
-          )}
-        </Card>
+          </Card>
 
-        <Card style={styles.card}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>직접 추가</Text>
-          <View style={styles.customInputRow}>
-            <TextInput
-              style={[styles.customInput, { borderColor: colors.border, color: colors.text, backgroundColor: colors.background }]}
-              placeholder="예: 고수, 민트 등"
-              placeholderTextColor={colors.textGray}
-              value={customAllergen}
-              onChangeText={setCustomAllergen}
-            />
-            <Button variant="outline" size="sm" onPress={addCustomAllergen}>
-              추가
+          <Card style={styles.card}>
+            <View style={styles.titleRow}>
+              <View style={[styles.titleIconWrap, { backgroundColor: colors.blue50 }]}>
+                <AppIcon name="check-circle" size={15} color={colors.primary} />
+              </View>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>추가된 알레르기 {selectedAllergens.length}개</Text>
+            </View>
+            <View style={styles.tags}>
+              {selectedAllergens.length === 0 ? (
+                <Text style={[styles.emptyText, { color: colors.textSecondary }]}>아직 추가된 성분이 없어요.</Text>
+              ) : (
+                selectedAllergens.map((a, idx) => (
+                  <TouchableOpacity key={`${a}-${idx}`} style={[styles.tag, { backgroundColor: colors.backgroundGray, borderColor: colors.border }]} onPress={() => toggleAllergen(a)}>
+                    <Text style={[styles.tagText, { color: colors.text }]}>{a}</Text>
+                    <AppIcon name="close" size={14} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                ))
+              )}
+            </View>
+
+            <Text style={[styles.removeHint, { color: colors.textGray }]}>태그를 누르면 제거됩니다.</Text>
+            <View style={{ height: 12 }} />
+            <Button onPress={handleSave} disabled={saving}>
+              {saving ? '저장 중...' : '저장'}
             </Button>
-          </View>
-        </Card>
-
-        <Card style={styles.card}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>선택된 알레르기 (눌러서 제거)</Text>
-          <View style={styles.tags}>
-            {selectedAllergens.length === 0 ? (
-              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>없음</Text>
-            ) : (
-              selectedAllergens.map((a, idx) => (
-                <TouchableOpacity key={`${a}-${idx}`} style={[styles.tag, { backgroundColor: colors.backgroundGray, borderColor: colors.border }]} onPress={() => toggleAllergen(a)}>
-                  <Text style={[styles.tagText, { color: colors.text }]}>{a}</Text>
-                </TouchableOpacity>
-              ))
-            )}
-          </View>
-
-          <View style={{ height: 12 }} />
-          <Button onPress={handleSave} disabled={saving}>
-            {saving ? '저장 중...' : '저장'}
-          </Button>
-        </Card>
-      </ScrollView>
+          </Card>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -178,50 +159,32 @@ const styles = StyleSheet.create({
   card: {
     padding: SPACING.md,
     borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: COLORS.blue200,
+    backgroundColor: COLORS.backgroundGray,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  titleIconWrap: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sectionTitle: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '800',
     color: COLORS.text,
     marginBottom: 10,
   },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: RADIUS.md,
-    paddingHorizontal: 12,
-    backgroundColor: COLORS.background,
-  },
-  searchIcon: {
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    height: 44,
-    color: COLORS.text,
-  },
-  suggestions: {
-    marginTop: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: RADIUS.md,
-    overflow: 'hidden',
-  },
-  suggestionItem: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    backgroundColor: COLORS.background,
-  },
-  suggestionText: {
-    color: COLORS.text,
+  sectionDesc: {
     fontSize: 13,
+    marginBottom: 12,
+    lineHeight: 18,
   },
   customInputRow: {
     flexDirection: 'row',
@@ -232,11 +195,12 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 44,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: COLORS.blue200,
     borderRadius: RADIUS.md,
     paddingHorizontal: 12,
     color: COLORS.text,
     backgroundColor: COLORS.background,
+    fontSize: 14,
   },
   tags: {
     flexDirection: 'row',
@@ -244,12 +208,15 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   tag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: COLORS.backgroundGray,
+    backgroundColor: COLORS.background,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: COLORS.blue200,
   },
   tagText: {
     color: COLORS.text,
@@ -259,5 +226,9 @@ const styles = StyleSheet.create({
   emptyText: {
     color: COLORS.textSecondary,
     fontSize: 13,
+  },
+  removeHint: {
+    marginTop: 10,
+    fontSize: 11,
   },
 });

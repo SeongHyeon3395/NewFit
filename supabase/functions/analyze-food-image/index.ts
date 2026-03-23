@@ -11,6 +11,7 @@ const corsHeaders = {
 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
 const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const GEMINI_OPENAI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai';
 
 // ... (MacroBlock, parseJsonBlock, callGemini 함수는 기존과 동일하므로 생략 가능하지만 전체 흐름을 위해 유지) ...
 
@@ -755,30 +756,30 @@ async function callGeminiVision(params: {
   prompt: string;
 }): Promise<any | GeminiErrorResult> {
   const { base64, mime, model, apiKey, prompt } = params;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const url = `${GEMINI_OPENAI_BASE_URL}/chat/completions`;
   const body = {
-    contents: [
+    model,
+    messages: [
       {
-        parts: [
-          { text: prompt },
-          { inline_data: { mime_type: mime || 'image/jpeg', data: base64 } },
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: `data:${mime || 'image/jpeg'};base64,${base64}` } },
         ],
       },
     ],
-    safetySettings: [
-      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-    ],
-    generationConfig: { temperature: 0.1, maxOutputTokens: 1024 },
+    temperature: 0.1,
+    max_tokens: 1024,
   };
 
   const maxAttempts = 3;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
       body: JSON.stringify(body),
     });
 
@@ -795,7 +796,7 @@ async function callGeminiVision(params: {
     })();
 
     if (res.ok && !json?.error) {
-      const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+      const text: string | undefined = json?.choices?.[0]?.message?.content;
       if (!text) return { error: 'No text generated.', status: res.status };
       return parseJsonBlock(text);
     }
@@ -833,23 +834,22 @@ async function callGeminiText(params: {
   prompt: string;
 }): Promise<any | GeminiErrorResult> {
   const { model, apiKey, prompt } = params;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const url = `${GEMINI_OPENAI_BASE_URL}/chat/completions`;
   const body = {
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    safetySettings: [
-      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-    ],
-    generationConfig: { temperature: 0.2, maxOutputTokens: 768 },
+    model,
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.2,
+    max_tokens: 768,
   };
 
   const maxAttempts = 3;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
       body: JSON.stringify(body),
     });
 
@@ -866,7 +866,7 @@ async function callGeminiText(params: {
     })();
 
     if (res.ok && !json?.error) {
-      const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+      const text: string | undefined = json?.choices?.[0]?.message?.content;
       if (!text) return { error: 'No text generated.', status: res.status };
       return parseJsonBlock(text);
     }
@@ -912,8 +912,8 @@ serve(async (req: Request) => {
     const base64 = encodeBase64(bytes);
     const apiKey = Deno.env.get('GEMINI_API_KEY');
     // Prefer per-modality model settings; fall back to GEMINI_MODEL; then sensible defaults.
-    const visionModel = Deno.env.get('GEMINI_IMAGE_MODEL') || Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash';
-    const textModel = Deno.env.get('GEMINI_TEXT_MODEL') || Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash-lite';
+    const visionModel = Deno.env.get('GEMINI_IMAGE_MODEL') || Deno.env.get('GEMINI_MODEL') || 'gemini-3.1-pro';
+    const textModel = Deno.env.get('GEMINI_TEXT_MODEL') || Deno.env.get('GEMINI_MODEL') || 'gemini-3.1-flash-lite';
 
     // Debug logging
     console.log('[DEBUG] API Key present:', !!apiKey);
