@@ -481,7 +481,14 @@ export default function ScanScreen() {
                   })}
                 </View>
               </Card>
-            ) : null}
+            ) : (
+              <Card style={{ ...styles.infoCard, ...styles.recentCardWide }} variant="elevated">
+                <View style={styles.cardTitleRow}>
+                  <Text style={[styles.cardTitle, { color: colors.text }]}>최근 기록</Text>
+                </View>
+                <Text style={[styles.recentEmptyText, { color: colors.textSecondary }]}>최근 기록이 없어요.</Text>
+              </Card>
+            )}
 
             <Card style={styles.infoCard} variant="elevated">
               <View style={styles.cardTitleRow}>
@@ -807,4 +814,5 @@ const styles = StyleSheet.create({
   recentTextCol: { flex: 1, marginLeft: 12 },
   recentTitle: { fontSize: 14, fontWeight: '800', color: COLORS.text },
   recentSub: { marginTop: 2, fontSize: 12, color: COLORS.textGray },
+  recentEmptyText: { fontSize: 14, fontWeight: '600' },
 });

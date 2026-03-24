@@ -911,8 +911,8 @@ serve(async (req: Request) => {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const base64 = encodeBase64(bytes);
     const apiKey = Deno.env.get('GEMINI_API_KEY');
-    // Prefer per-modality model settings; fall back to GEMINI_MODEL; then sensible defaults.
-    const visionModel = Deno.env.get('GEMINI_IMAGE_MODEL') || Deno.env.get('GEMINI_MODEL') || 'gemini-3.1-pro';
+    // Image analysis should use Flash-Lite by default. Allow explicit override only via GEMINI_IMAGE_MODEL.
+    const visionModel = Deno.env.get('GEMINI_IMAGE_MODEL') || 'gemini-3.1-flash-lite';
     const textModel = Deno.env.get('GEMINI_TEXT_MODEL') || Deno.env.get('GEMINI_MODEL') || 'gemini-3.1-flash-lite';
 
     // Debug logging

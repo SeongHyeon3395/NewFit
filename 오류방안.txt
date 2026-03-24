@@ -13,4 +13,4 @@ npx react-native run-android
 빠른 복구용 최소 명령(같은 오류 재발 시)
 
 adb uninstall com.front
-npx react-native run-andr
+npx react-native run-android

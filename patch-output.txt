@@ -1,0 +1,97 @@
+patch-package 8.0.1
+• Creating temporary folder
+• Installing react-native-worklets-core@1.6.2 with npm
+• Diffing your files with clean files
+warning: in the working copy of 'node_modules/react-native-worklets-core/LICENSE', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/android/CMakeLists.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/android/build.gradle', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/android/cpp-adapter.cpp', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/android/fix-prefab.gradle', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/android/gradle.properties', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/android/src/main/AndroidManifest.xml', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/android/src/main/java/com/worklets/WorkletsCorePackage.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/android/src/main/java/com/worklets/WorkletsModule.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/android/src/newarch/WorkletsSpec.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/android/src/oldarch/WorkletsSpec.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/WKTJsRuntimeFactory.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/WKTJsiBaseDecorator.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/WKTJsiDispatcher.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/WKTJsiWorklet.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/WKTJsiWorkletApi.cpp', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/WKTJsiWorkletApi.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/WKTJsiWorkletContext.cpp', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/WKTJsiWorkletContext.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/base/WKTJsiHostObject.cpp', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/base/WKTJsiHostObject.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/base/WKTRuntimeAwareCache.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/base/WKTRuntimeLifecycleMonitor.cpp', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/base/WKTRuntimeLifecycleMonitor.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/decorators/WKTJsiConsoleDecorator.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/decorators/WKTJsiJsDecorator.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/decorators/WKTJsiPerformanceDecorator.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/decorators/WKTJsiSetImmediateDecorator.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/dispatch/WKTDispatchQueue.cpp', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/dispatch/WKTDispatchQueue.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/sharedvalues/WKTJsiSharedValue.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/wrappers/WKTArgumentsWrapper.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/wrappers/WKTJsiArrayWrapper.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/wrappers/WKTJsiObjectWrapper.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/wrappers/WKTJsiPromiseWrapper.cpp', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/wrappers/WKTJsiPromiseWrapper.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/wrappers/WKTJsiWrapper.cpp', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/cpp/wrappers/WKTJsiWrapper.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/img/banner.svg', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/ios/Worklets.h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/ios/Worklets.mm', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/ios/Worklets.xcodeproj/project.pbxproj', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/commonjs/NativeWorklets.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/commonjs/hooks/useRunOnJS.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/commonjs/hooks/useSharedValue.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/commonjs/hooks/useWorklet.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/commonjs/index.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/commonjs/plugin/index.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/commonjs/types.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/commonjs/worklet.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/module/NativeWorklets.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/module/hooks/useRunOnJS.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/module/hooks/useSharedValue.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/module/hooks/useWorklet.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/module/index.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/module/plugin/index.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/module/types.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/module/worklet.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/typescript/NativeWorklets.d.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/typescript/hooks/useRunOnJS.d.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/typescript/hooks/useSharedValue.d.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/typescript/hooks/useWorklet.d.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/typescript/index.d.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/typescript/types.d.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/lib/typescript/worklet.d.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/plugin.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/react-native-worklets-core.podspec', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/src/NativeWorklets.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/src/hooks/useRunOnJS.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/src/hooks/useSharedValue.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/src/hooks/useWorklet.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/src/index.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/src/plugin/index.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/src/types.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'node_modules/react-native-worklets-core/src/worklet.ts', LF will be replaced by CRLF the next time Git touches it
+error: open("node_modules/react-native-worklets-core/android/build/.transforms/270705d8fc7937fe8cc5542a11aafda9/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/com/worklets/NativeWorkletsSpec.dex"): Filename too long
+error: unable to index file 'node_modules/react-native-worklets-core/android/build/.transforms/270705d8fc7937fe8cc5542a11aafda9/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/com/worklets/NativeWorkletsSpec.dex'
+fatal: adding files failed
+
+{
+  status: 128,
+  signal: null,
+  output: [
+    null,
+    <Buffer >,
+    <Buffer 77 61 72 6e 69 6e 67 3a 20 69 6e 20 74 68 65 20 77 6f 72 6b 69 6e 67 20 63 6f 70 79 20 6f 66 20 27 6e 6f 64 65 5f 6d 6f 64 75 6c 65 73 2f 72 65 61 63 ... 12686 more bytes>
+  ],
+  pid: 1476,
+  stdout: <Buffer >,
+  stderr: <Buffer 77 61 72 6e 69 6e 67 3a 20 69 6e 20 74 68 65 20 77 6f 72 6b 69 6e 67 20 63 6f 70 79 20 6f 66 20 27 6e 6f 64 65 5f 6d 6f 64 75 6c 65 73 2f 72 65 61 63 ... 12686 more bytes>,
+  error: null
+}
